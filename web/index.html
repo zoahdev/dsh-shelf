@@ -26,6 +26,9 @@
     .empty { color:var(--muted); text-align:center; padding:40px 0; }
     pre { background:#0d1117; border:1px solid var(--line); border-radius:10px; padding:14px; overflow:auto; font-size:13px; }
     .notice { color:var(--muted); font-size:12px; margin-top:16px; }
+    .chart { display:flex; align-items:flex-end; gap:4px; height:72px; margin-bottom:18px; }
+    .chart .bar { flex:1; background:linear-gradient(180deg,var(--accent),#9b5de5); border-radius:4px 4px 0 0; min-width:2px; }
+    .chart .bar:hover { filter:brightness(1.2); }
   </style>
 </head>
 <body>
@@ -38,6 +41,7 @@
       <div class="stat"><b id="zstd">0</b><span>zstd</span></div>
       <div class="stat"><b id="bytes">0 B</b><span>total</span></div>
     </div>
+    <div id="chart" class="chart"></div>
     <div class="toolbar">
       <input type="text" id="q" placeholder="Search: parser bug / 解析器 缓存…">
       <button id="search">Search</button>
@@ -63,6 +67,10 @@
       $('zstd').textContent = data.stats.compressed
       $('bytes').textContent = fmt(data.stats.bytes)
       render(data.sessions)
+      const report = await api('/api/report?days=14')
+      const max = Math.max(1, ...report.byDay.map(d => d.created))
+      $('chart').innerHTML = report.byDay.map(d =>
+        `<div class="bar" title="${d.day}: ${d.created}" style="height:${Math.max(3, Math.round(d.created/max*100))}%"></div>`).join('')
     }
     function fmt(bytes) {
       if (bytes < 1024) return bytes + ' B'
