@@ -20,6 +20,7 @@ npx dsh-shelf report                        # weekly session digest (Markdown)
 npx dsh-shelf report 30 --format json       # 30-day digest as JSON
 npx dsh-shelf archive-old 30                # dry run: sessions older than 30 days
 npx dsh-shelf archive-old 30 --yes          # move them to sessions-archive
+npx dsh-shelf web                           # local web panel at http://127.0.0.1:4174
 ```
 
 Roots: `--root` overrides; default is `$DSH_SESSIONS` or `~/.dsh/sessions`. Archive/trash roots default to `sessions-archive` / `sessions-trash` next to the root.
@@ -48,8 +49,10 @@ node scripts/shelf.mjs list --root <fixtures>
 
 - [x] list / stats / export (md/json/jsonl) / archive / restore / trash / search
 - [x] weekly digest (`report`) + auto-archive (`archive-old`, dry-run by default)
-- [ ] Web UI plugin (manage sessions from Settings)
-- [ ] FTS5 search with Chinese tokenizer (aligns with #1999)
+- [x] local web panel (`dsh-shelf web`) - list/search/export/archive/trash from the browser
+- [x] Chinese search via CJK bigram tokenizer (zero-dependency; aligns with #1999)
+- [ ] DSH plugin wrapper (open the panel from `dsh web`)
+- [ ] FTS5-backed search when the host provides SQLite FTS5
 - [ ] Zstandard export (zstd decode)
 
 ## License
