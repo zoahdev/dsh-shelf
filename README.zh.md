@@ -18,6 +18,7 @@ npx dsh-shelf trash <id>                    # 移入回收站（可恢复）
 npx dsh-shelf restore-trash <id>
 npx dsh-shelf report                        # 周报 digest（Markdown）
 npx dsh-shelf report 30 --format json       # 30 天 digest（JSON）
+npx dsh-shelf report 14 --format html --out shelf-report.html   # 离线看板
 npx dsh-shelf archive-old 30                # 预演：30 天前的会话
 npx dsh-shelf archive-old 30 --yes          # 移入 sessions-archive
 npx dsh-shelf web                           # 本地 Web 面板 http://127.0.0.1:4174
@@ -49,7 +50,8 @@ dsh plugin --profile web add github:zoahdev/dsh-shelf
 
 - [x] list / stats / export（md/json/jsonl）/ archive / restore / trash / search
 - [x] 周报 digest（report）+ 自动归档（archive-old，默认预演）
-- [x] 本地 Web 面板（dsh-shelf web）——浏览器里列表/搜索/导出/归档/回收站
+- [x] 本地 Web 面板（dsh-shelf web）——浏览器里列表/搜索/导出/归档/回收站 + 每日图表
+- [x] 离线 HTML 看板（report --format html）——可分享的每日柱状图 + 最大会话
 - [x] 中文搜索（CJK bigram 分词，零依赖；对齐 #1999）
 - [x] DSH 插件包装（`dsh plugin add github:zoahdev/dsh-shelf` 打开面板）
 - [ ] FTS5 搜索（宿主提供 SQLite FTS5 时）
