@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dsh-shelf · session lifecycle</title>
+  <style>
+    :root { --bg:#0f1220; --card:#1a1f35; --line:#2b3252; --ink:#eef1ff; --muted:#8b93b8; --accent:#4f9cf9; --danger:#f26d6d; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(1000px 500px at 50% -10%, #232a4d 0%, var(--bg) 60%); color:var(--ink); font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; min-height:100vh; }
+    .wrap { max-width:880px; margin:0 auto; padding:32px 20px 80px; }
+    h1 { margin:0 0 4px; } .sub { color:var(--muted); margin:0 0 20px; }
+    .toolbar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+    input[type=text] { flex:1; min-width:220px; background:#12162a; border:1px solid var(--line); color:var(--ink); border-radius:10px; padding:10px 12px; }
+    button { border:0; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; background:linear-gradient(135deg,var(--accent),#9b5de5); color:#fff; }
+    button.ghost { background:#12162a; border:1px solid var(--line); color:var(--ink); }
+    .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:18px; }
+    .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px; text-align:center; }
+    .stat b { display:block; font-size:22px; }
+    .stat span { color:var(--muted); font-size:12px; }
+    .row { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:8px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .row .id { font-weight:700; min-width:120px; }
+    .row .meta { color:var(--muted); font-size:12px; flex:1; min-width:140px; }
+    .row .actions { display:flex; gap:6px; }
+    .row .actions button { padding:6px 10px; font-size:12px; }
+    .empty { color:var(--muted); text-align:center; padding:40px 0; }
+    pre { background:#0d1117; border:1px solid var(--line); border-radius:10px; padding:14px; overflow:auto; font-size:13px; }
+    .notice { color:var(--muted); font-size:12px; margin-top:16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>📚 dsh-shelf</h1>
+    <p class="sub">Session lifecycle for DeepSeek Harness — export / archive / trash / search. Read-only unless you act.</p>
+    <div class="stats">
+      <div class="stat"><b id="total">0</b><span>sessions</span></div>
+      <div class="stat"><b id="plain">0</b><span>plain</span></div>
+      <div class="stat"><b id="zstd">0</b><span>zstd</span></div>
+      <div class="stat"><b id="bytes">0 B</b><span>total</span></div>
+    </div>
+    <div class="toolbar">
+      <input type="text" id="q" placeholder="Search: parser bug / 解析器 缓存…">
+      <button id="search">Search</button>
+      <button class="ghost" id="refresh">Refresh</button>
+    </div>
+    <div id="list"></div>
+    <pre id="out" style="display:none"></pre>
+    <p class="notice">Moves are reversible (archive/trash → restore). Export is read-only. Data never leaves this machine.</p>
+  </div>
+  <script>
+    const $ = id => document.getElementById(id)
+    async function api(path, options) {
+      const res = await fetch(path, options)
+      if (!res.ok) throw new Error(await res.text())
+      const text = await res.text()
+      try { return JSON.parse(text) } catch { return text }
+    }
+    function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])) }
+    async function load() {
+      const data = await api('/api/sessions')
+      $('total').textContent = data.stats.total
+      $('plain').textContent = data.stats.plain
+      $('zstd').textContent = data.stats.compressed
+      $('bytes').textContent = fmt(data.stats.bytes)
+      render(data.sessions)
+    }
+    function fmt(bytes) {
+      if (bytes < 1024) return bytes + ' B'
+      if (bytes < 1048576) return (bytes/1024).toFixed(1) + ' KB'
+      return (bytes/1048576).toFixed(1) + ' MB'
+    }
+    function render(sessions) {
+      const list = $('list')
+      if (sessions.length === 0) { list.innerHTML = '<div class="empty">No sessions found.</div>'; return }
+      list.innerHTML = sessions.map(s => `
+        <div class="row">
+          <span class="id">${esc(s.id ?? '(no id)')}${s.compressed ? ' <small>[zstd]</small>' : ''}</span>
+          <span class="meta">${esc(s.file)}</span>
+          <span class="actions">
+            <button onclick="doExport(${JSON.stringify(s.id ?? '')})">Export</button>
+            <button onclick="doMove(${JSON.stringify(s.id ?? '')},'archive')">Archive</button>
+            <button onclick="doMove(${JSON.stringify(s.id ?? '')},'trash')">Trash</button>
+          </span>
+        </div>`).join('')
+    }
+    async function doExport(id) {
+      const text = await api('/api/export?id=' + encodeURIComponent(id) + '&format=md')
+      const out = $('out')
+      out.textContent = text
+      out.style.display = 'block'
+      out.scrollIntoView()
+    }
+    async function doMove(id, action) {
+      const label = action === 'trash' ? 'trash' : 'archive'
+      if (!confirm(`Move session ${id} to ${label}? This is reversible.`)) return
+      await api('/api/move', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ id, action }) })
+      load()
+    }
+    $('search').addEventListener('click', async () => {
+      const q = $('q').value.trim()
+      if (!q) return load()
+      const hits = await api('/api/search?q=' + encodeURIComponent(q))
+      render(hits.map(h => ({ id: h.id, file: h.file, compressed: false })))
+    })
+    $('refresh').addEventListener('click', load)
+    $('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('search').click() })
+    load()
+  </script>
+</body>
+</html>
