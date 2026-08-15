@@ -88,6 +88,14 @@ export function sessionStats(root) {
   }
 }
 
+/** Top sessions by on-disk size (largest first). */
+export function topSessions(root, limit = 5) {
+  return listSessions(root)
+    .map(session => ({ ...session, bytes: sessionBytes(session) }))
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, limit)
+}
+
 export async function exportSession(file, format = 'md') {
   const buffer = readFileSync(file)
   if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_MAGIC)) {
@@ -291,6 +299,64 @@ export function renderReport(report) {
   }
   lines.push('')
   return lines.join('\n')
+}
+
+/** Render the session digest as a self-contained offline HTML dashboard. */
+export function renderReportHtml(report, top = []) {
+  const maxDay = Math.max(1, ...report.byDay.map(day => day.created))
+  const bars = report.byDay.map(day => {
+    const width = Math.round((day.created / maxDay) * 100)
+    return `<div class="bar-row"><span class="day">${day.day}</span>`
+      + `<div class="bar"><i style="width:${width}%"></i></div>`
+      + `<span class="n">${day.created}</span></div>`
+  }).join('')
+  const topRows = top.map(session => (
+    `<div class="row"><b>${esc(session.id ?? '(no id)')}</b><span>${formatBytesHtml(session.bytes)}</span>`
+    + `<code>${esc(session.file)}</code></div>`
+  )).join('') || '<div class="muted">No sessions.</div>'
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-shelf report</title>
+<style>
+  :root{color-scheme:dark;--bg:#0b1020;--card:#131a30;--line:#223050;--ink:#e8ecf8;--muted:#8a94b8;--accent:#4f9cf9;--green:#3ddc97}
+  *{box-sizing:border-box}body{margin:0;background:radial-gradient(1000px 500px at 50% -10%,#1b2b52 0%,var(--bg) 60%);color:var(--ink);font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100vh}
+  .wrap{max-width:820px;margin:0 auto;padding:36px 20px 80px}
+  h1{margin:0 0 4px}.sub{color:var(--muted);margin:0 0 22px}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center}
+  .card b{display:block;font-size:28px}.card span{color:var(--muted);font-size:12px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .panel h2{margin:0 0 14px;font-size:16px}
+  .bar-row{display:flex;align-items:center;gap:10px;font-size:12px;margin:7px 0}
+  .day{width:96px;color:var(--muted)}.bar{flex:1;height:10px;background:#223050;border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--green))}
+  .n{width:32px;text-align:right}
+  .row{display:flex;gap:10px;align-items:center;font-size:13px;margin:8px 0}.row b{min-width:120px}.row span{color:var(--muted)}.row code{color:var(--accent);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px}
+  .muted{color:var(--muted)}
+  footer{margin-top:30px;color:var(--muted);font-size:12px;text-align:center}
+</style></head><body><div class="wrap">
+<h1>📚 dsh-shelf report</h1><p class="sub">Generated ${esc(report.generatedAt)}</p>
+<div class="cards">
+  <div class="card"><b>${report.total}</b><span>sessions</span></div>
+  <div class="card"><b>${report.total - report.byDay.reduce((s,d)=>s+d.compressed,0)}</b><span>plain</span></div>
+  <div class="card"><b>${report.byDay.reduce((s,d)=>s+d.compressed,0)}</b><span>zstd</span></div>
+  <div class="card"><b>${formatBytesHtml(report.totalBytes)}</b><span>total</span></div>
+</div>
+<div class="panel"><h2>Sessions per day (last ${report.days} days)</h2>${bars}</div>
+<div class="panel"><h2>Largest sessions</h2>${topRows}</div>
+<footer>dsh-shelf · https://github.com/zoahdev/dsh-shelf</footer>
+</div></body></html>`
+}
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]))
+}
+
+function formatBytesHtml(bytes) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1048576).toFixed(1)} MB`
 }
 
 function formatBytes(bytes) {
