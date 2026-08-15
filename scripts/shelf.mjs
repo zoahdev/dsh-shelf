@@ -24,12 +24,14 @@ import {
   listSessions,
   moveSession,
   archiveOlderThan,
+  rescueSession,
   renderReportHtml,
   renderReport,
   reportSessions,
   searchSessions,
   sessionStats,
   topSessions,
+  verifySessions,
   writeExport,
 } from '../engine/shelf.js'
 import { createShelfServer } from './shelf-server.mjs'
@@ -118,6 +120,32 @@ if (command === 'report') {
   } else {
     console.log(renderReport(report))
   }
+  process.exit(0)
+}
+
+if (command === 'verify') {
+  const report = verifySessions(root)
+  if (args.format === 'json' || args.json) {
+    console.log(JSON.stringify(report, null, 2))
+  } else {
+    for (const entry of report) {
+      console.log(`${entry.status}\t${entry.id}\t${entry.issues.join('; ') || entry.file}`)
+    }
+  }
+  process.exit(report.some(entry => entry.status !== 'ok' && entry.status !== 'zstd') ? 1 : 0)
+}
+
+if (command === 'rescue') {
+  const id = args._[1]
+  if (id === undefined) {
+    console.error('usage: dsh-shelf rescue <id> [--out <path>]')
+    process.exit(2)
+  }
+  const session = findSession(id)
+  const { md } = await rescueSession(session.file)
+  const out = args.out !== null ? resolve(args.out) : resolve(`${session.id ?? 'rescued'}.md`)
+  writeExport(out, md)
+  console.log(`rescued ${session.id ?? session.dir} -> ${out}`)
   process.exit(0)
 }
 
