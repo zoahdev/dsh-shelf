@@ -20,6 +20,8 @@ npx dsh-shelf report                        # 周报 digest（Markdown）
 npx dsh-shelf report 30 --format json       # 30 天 digest（JSON）
 npx dsh-shelf report 14 --format html --out shelf-report.html   # 离线看板
 npx dsh-shelf archive-old 30                # 预演：30 天前的会话
+npx dsh-shelf verify                        # 会话健康检查（孤儿 tool call/未完成/空文件）
+npx dsh-shelf rescue <id>                   # 抢救不可恢复会话的内容
 npx dsh-shelf archive-old 30 --yes          # 移入 sessions-archive
 npx dsh-shelf web                           # 本地 Web 面板 http://127.0.0.1:4174
 ```
@@ -54,6 +56,8 @@ dsh plugin --profile web add github:zoahdev/dsh-shelf
 - [x] 离线 HTML 看板（report --format html）——可分享的每日柱状图 + 最大会话
 - [x] 中文搜索（CJK bigram 分词，零依赖；对齐 #1999）
 - [x] DSH 插件包装（`dsh plugin add github:zoahdev/dsh-shelf` 打开面板）
+
+- [x] 会话健康检查（verify）+ 不可恢复会话抢救导出（#1959/#2034 家族）
 - [ ] FTS5 搜索（宿主提供 SQLite FTS5 时）
 - [x] Zstandard 导出（Node ≥ 22.19 node:zlib 解码）
 
