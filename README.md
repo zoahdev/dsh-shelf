@@ -16,6 +16,10 @@ npx dsh-shelf archive <id>                  # move to sessions-archive (never de
 npx dsh-shelf restore <id>                  # move it back
 npx dsh-shelf trash <id>                    # move to sessions-trash (recoverable)
 npx dsh-shelf restore-trash <id>
+npx dsh-shelf report                        # weekly session digest (Markdown)
+npx dsh-shelf report 30 --format json       # 30-day digest as JSON
+npx dsh-shelf archive-old 30                # dry run: sessions older than 30 days
+npx dsh-shelf archive-old 30 --yes          # move them to sessions-archive
 ```
 
 Roots: `--root` overrides; default is `$DSH_SESSIONS` or `~/.dsh/sessions`. Archive/trash roots default to `sessions-archive` / `sessions-trash` next to the root.
@@ -43,10 +47,10 @@ node scripts/shelf.mjs list --root <fixtures>
 ## Roadmap
 
 - [x] list / stats / export (md/json/jsonl) / archive / restore / trash / search
+- [x] weekly digest (`report`) + auto-archive (`archive-old`, dry-run by default)
 - [ ] Web UI plugin (manage sessions from Settings)
 - [ ] FTS5 search with Chinese tokenizer (aligns with #1999)
 - [ ] Zstandard export (zstd decode)
-- [ ] Schedule: auto-archive sessions older than N days
 
 ## License
 
