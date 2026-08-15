@@ -1,14 +1,18 @@
 {
   "name": "dsh-shelf",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Session lifecycle for DeepSeek Harness: export, archive, restore, trash, search, and stats for your dsh session library. Zero dependencies, read-only by default.",
   "type": "module",
+  "main": "lib/index.js",
   "bin": {
     "dsh-shelf": "scripts/shelf.mjs"
   },
   "files": [
     "engine",
     "scripts",
+    "web",
+    "lib",
+    "cordis.patch.yml",
     "README.md",
     "README.zh.md",
     "LICENSE"
@@ -28,5 +32,13 @@
   "license": "MIT",
   "engines": {
     "node": ">=18"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   }
 }
