@@ -1,0 +1,32 @@
+{
+  "name": "dsh-shelf",
+  "version": "0.1.0",
+  "description": "Session lifecycle for DeepSeek Harness: export, archive, restore, trash, search, and stats for your dsh session library. Zero dependencies, read-only by default.",
+  "type": "module",
+  "bin": {
+    "dsh-shelf": "scripts/shelf.mjs"
+  },
+  "files": [
+    "engine",
+    "scripts",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test tests/shelf.test.mjs",
+    "start": "node scripts/shelf.mjs"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "session",
+    "archive",
+    "export",
+    "lifecycle"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
