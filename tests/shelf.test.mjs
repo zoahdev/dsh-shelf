@@ -9,9 +9,11 @@ import {
   listSessions,
   moveSession,
   archiveOlderThan,
+  renderReportHtml,
   reportSessions,
   searchSessions,
   sessionStats,
+  topSessions,
   tokenizeQuery,
 } from '../engine/shelf.js'
 
@@ -158,6 +160,40 @@ test('searchSessions finds Chinese sessions by bigram', () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('topSessions sorts by size descending', () => {
+  const root = tempRoot()
+  try {
+    const small = writeSession(root, 'small', [{ type: 'turn/start' }], Date.now())
+    const big = writeSession(root, 'big', [{ type: 'turn/start' }], Date.now())
+    writeFileSync(join(big, 'session.jsonl'), readBigFile(small, big))
+    const top = topSessions(join(root, 'sessions'), 2)
+    assert.equal(top[0].id, 'big')
+    assert.ok(top[0].bytes > top[1].bytes)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('renderReportHtml emits a self-contained dashboard', () => {
+  const root = tempRoot()
+  try {
+    writeSession(root, 's1', [{ type: 'turn/start' }], Date.now())
+    const report = reportSessions(join(root, 'sessions'), 3)
+    const html = renderReportHtml(report, topSessions(join(root, 'sessions'), 3))
+    assert.match(html, /dsh-shelf report/)
+    assert.match(html, /Sessions per day/)
+    assert.match(html, /Largest sessions/)
+    assert.match(html, /<html/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+function readBigFile(small, big) {
+  const base = JSON.stringify({ type: 'session', version: 0, id: 'big', createdAt: Date.now() }) + '\n' + JSON.stringify({ type: 'turn/start' }) + '\n'
+  return base + 'x'.repeat(500) + '\n'
+}
 
 test('reportSessions buckets sessions by creation day', () => {
   const root = tempRoot()
