@@ -1,0 +1,5 @@
+- insert:
+    - id: dsh-shelf
+      name: dsh-shelf
+      config:
+        port: 4174
