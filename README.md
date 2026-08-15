@@ -23,6 +23,13 @@ npx dsh-shelf archive-old 30 --yes          # move them to sessions-archive
 npx dsh-shelf web                           # local web panel at http://127.0.0.1:4174
 ```
 
+DSH plugin mode (panel bound to the active profile):
+
+```sh
+dsh plugin --profile web add github:zoahdev/dsh-shelf
+# panel at http://127.0.0.1:4174 (committed lib/, no build at install)
+```
+
 Roots: `--root` overrides; default is `$DSH_SESSIONS` or `~/.dsh/sessions`. Archive/trash roots default to `sessions-archive` / `sessions-trash` next to the root.
 
 ## Safety model
@@ -51,9 +58,9 @@ node scripts/shelf.mjs list --root <fixtures>
 - [x] weekly digest (`report`) + auto-archive (`archive-old`, dry-run by default)
 - [x] local web panel (`dsh-shelf web`) - list/search/export/archive/trash from the browser
 - [x] Chinese search via CJK bigram tokenizer (zero-dependency; aligns with #1999)
-- [ ] DSH plugin wrapper (open the panel from `dsh web`)
+- [x] DSH plugin wrapper (`dsh plugin add github:zoahdev/dsh-shelf` opens the panel)
 - [ ] FTS5-backed search when the host provides SQLite FTS5
-- [ ] Zstandard export (zstd decode)
+- [x] Zstandard export (node:zlib decode on Node >= 22.19)
 
 ## License
 
