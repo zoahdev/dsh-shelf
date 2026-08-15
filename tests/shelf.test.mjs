@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createZstdCompress } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -58,17 +59,43 @@ test('sessionStats counts plain and compressed sessions and bytes', () => {
   }
 })
 
-test('exportSession renders markdown with user/assistant messages', () => {
+test('exportSession renders markdown with user/assistant messages', async () => {
   const root = tempRoot()
   try {
     const dir = writeSession(root, 's1', [
       { type: 'user/message', data: { content: [{ type: 'text', text: 'hello' }] } },
       { type: 'assistant/message', data: { content: [{ type: 'text', text: 'hi there' }] } },
     ])
-    const md = exportSession(join(dir, 'session.jsonl'), 'md')
+    const md = await exportSession(join(dir, 'session.jsonl'), 'md')
     assert.match(md, /## User/)
     assert.match(md, /hello/)
     assert.match(md, /hi there/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('exportSession decodes Zstandard session logs via node:zlib', async () => {
+  const root = tempRoot()
+  try {
+    const dir = join(root, 'sessions', 'p', 'zstd')
+    mkdirSync(dir, { recursive: true })
+    const plain = [
+      JSON.stringify({ type: 'session', version: 0, id: 'zstd', createdAt: 1000 }),
+      JSON.stringify({ type: 'user/message', data: { content: [{ type: 'text', text: 'zstd hello' }] } }),
+      '',
+    ].join('\n')
+    const compressed = await new Promise((resolve, reject) => {
+      const stream = createZstdCompress()
+      const chunks = []
+      stream.on('data', chunk => chunks.push(chunk))
+      stream.on('end', () => resolve(Buffer.concat(chunks)))
+      stream.on('error', reject)
+      stream.end(plain)
+    })
+    writeFileSync(join(dir, 'session.jsonl'), compressed)
+    const md = await exportSession(join(dir, 'session.jsonl'), 'md')
+    assert.match(md, /zstd hello/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
