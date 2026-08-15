@@ -23,6 +23,9 @@ import {
   exportSession,
   listSessions,
   moveSession,
+  archiveOlderThan,
+  renderReport,
+  reportSessions,
   searchSessions,
   sessionStats,
   writeExport,
@@ -93,6 +96,33 @@ if (command === 'export') {
       process.stdout.write(content)
     }
   }
+  process.exit(0)
+}
+
+if (command === 'report') {
+  const days = Number(args._[1] ?? 7)
+  const report = reportSessions(root, Number.isInteger(days) && days > 0 ? days : 7)
+  if (args.format === 'json' || args.json) {
+    console.log(JSON.stringify(report, null, 2))
+  } else {
+    console.log(renderReport(report))
+  }
+  process.exit(0)
+}
+
+if (command === 'archive-old') {
+  const days = Number(args._[1] ?? 30)
+  if (!Number.isInteger(days) || days <= 0) {
+    console.error('usage: dsh-shelf archive-old <days> [--yes]')
+    process.exit(2)
+  }
+  if (!args.yes) {
+    console.error(`dry run: ${archiveOlderThan(root, archive, days).length} session(s) would move; pass --yes to archive`)
+    process.exit(0)
+  }
+  const moved = archiveOlderThan(root, archive, days)
+  console.log(`archived ${moved.length} session(s) older than ${days} days`)
+  for (const entry of moved) console.log(`${entry.id}\t${entry.from} -> ${entry.to}`)
   process.exit(0)
 }
 
