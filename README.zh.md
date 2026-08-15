@@ -20,6 +20,7 @@ npx dsh-shelf report                        # 周报 digest（Markdown）
 npx dsh-shelf report 30 --format json       # 30 天 digest（JSON）
 npx dsh-shelf archive-old 30                # 预演：30 天前的会话
 npx dsh-shelf archive-old 30 --yes          # 移入 sessions-archive
+npx dsh-shelf web                           # 本地 Web 面板 http://127.0.0.1:4174
 ```
 
 根目录：`--root` 指定；默认 `$DSH_SESSIONS` 或 `~/.dsh/sessions`。归档/回收站默认在根目录旁 `sessions-archive` / `sessions-trash`。
@@ -41,8 +42,10 @@ npx dsh-shelf archive-old 30 --yes          # 移入 sessions-archive
 
 - [x] list / stats / export（md/json/jsonl）/ archive / restore / trash / search
 - [x] 周报 digest（report）+ 自动归档（archive-old，默认预演）
-- [ ] Web UI 插件（设置页管理会话）
-- [ ] FTS5 中文分词搜索（对齐 #1999）
+- [x] 本地 Web 面板（dsh-shelf web）——浏览器里列表/搜索/导出/归档/回收站
+- [x] 中文搜索（CJK bigram 分词，零依赖；对齐 #1999）
+- [ ] DSH 插件包装（从 dsh web 打开面板）
+- [ ] FTS5 搜索（宿主提供 SQLite FTS5 时）
 - [ ] Zstandard 导出（zstd 解码）
 
 ## License
