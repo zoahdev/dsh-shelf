@@ -166,3 +166,79 @@ export function searchSessions(root, query) {
   }
   return hits
 }
+
+/** Per-day session counts for the last `days` days (by header createdAt). */
+export function reportSessions(root, days = 7) {
+  const now = Date.now()
+  const dayMs = 24 * 60 * 60 * 1000
+  const buckets = new Map()
+  for (let offset = days - 1; offset >= 0; offset -= 1) {
+    const day = new Date(now - offset * dayMs).toISOString().slice(0, 10)
+    buckets.set(day, { created: 0, plain: 0, compressed: 0, bytes: 0 })
+  }
+  let totalBytes = 0
+  for (const session of listSessions(root)) {
+    totalBytes += sessionBytes(session)
+    if (session.createdAt === undefined) continue
+    const day = new Date(session.createdAt).toISOString().slice(0, 10)
+    const bucket = buckets.get(day)
+    if (bucket === undefined) continue
+    bucket.created += 1
+    if (session.compressed) bucket.compressed += 1
+    else bucket.plain += 1
+    bucket.bytes += sessionBytes(session)
+  }
+  const total = listSessions(root).length
+  return {
+    generatedAt: new Date().toISOString(),
+    days,
+    total,
+    totalBytes,
+    byDay: [...buckets.entries()].map(([day, value]) => ({ day, ...value })),
+  }
+}
+
+function sessionBytes(session) {
+  try {
+    return statSync(session.file).size
+  } catch {
+    return 0
+  }
+}
+
+/** Move sessions whose header `createdAt` is older than `days` days. */
+export function archiveOlderThan(root, archiveRoot, days, includeCompressed = false) {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+  const moved = []
+  for (const session of listSessions(root)) {
+    if (session.compressed && !includeCompressed) continue
+    if (session.createdAt === undefined || session.createdAt >= cutoff) continue
+    const id = session.id ?? session.dir.split(/[\\/]/u).pop()
+    const target = moveSession(session.dir, archiveRoot, id)
+    moved.push({ id, from: session.dir, to: target })
+  }
+  return moved
+}
+
+/** Render the session digest as Markdown (bilingual labels not required). */
+export function renderReport(report) {
+  const lines = [
+    `# dsh session digest`,
+    '',
+    `Generated ${report.generatedAt} 路 ${report.total} sessions 路 ${formatBytes(report.totalBytes)}`,
+    '',
+    '| Day | Created | Plain | Zstd | Bytes |',
+    '| --- | --- | --- | --- | --- |',
+  ]
+  for (const day of report.byDay) {
+    lines.push(`| ${day.day} | ${day.created} | ${day.plain} | ${day.compressed} | ${formatBytes(day.bytes)} |`)
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
