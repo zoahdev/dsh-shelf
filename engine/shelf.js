@@ -347,6 +347,57 @@ export function renderReportHtml(report, top = []) {
 </div></body></html>`
 }
 
+/**
+ * Health-check every session log (plain only; zstd is reported separately).
+ * Detects the un-resumable pattern family (#1959/#2034): orphan tool calls
+ * (a tool/call without a matching result), missing turn/end (unfinished),
+ * header-only files, and unreadable logs.
+ */
+export function verifySessions(root) {
+  const report = []
+  for (const session of listSessions(root)) {
+    const base = { id: session.id ?? session.dir, file: session.file }
+    if (session.compressed) {
+      report.push({ ...base, status: 'zstd', issues: ['compressed log; use rescue for export'] })
+      continue
+    }
+    let text = ''
+    try {
+      text = readFileSync(session.file, 'utf8')
+    } catch {
+      report.push({ ...base, status: 'corrupt', issues: ['unreadable log'] })
+      continue
+    }
+    const lines = text.split(/\r?\n/u).filter(line => line.trim() !== '')
+    if (lines.length <= 1) {
+      report.push({ ...base, status: 'empty', issues: ['header-only or empty log'] })
+      continue
+    }
+    const events = []
+    for (const line of lines) {
+      try {
+        events.push(JSON.parse(line))
+      } catch {
+        // non-JSON tail bytes are not session events
+      }
+    }
+    const calls = events.filter(event => event.type === 'tool/call' || event.type === 'tool-call').length
+    const results = events.filter(event => event.type === 'tool/result' || event.type === 'tool-result').length
+    const turnEnds = events.filter(event => event.type === 'turn/end').length
+    const issues = []
+    if (calls > results) issues.push(`orphan tool call(s): ${calls} call(s) vs ${results} result(s)`)
+    if (turnEnds === 0) issues.push('no turn/end (unfinished)')
+    report.push({ ...base, status: issues.length > 0 ? 'unhealthy' : 'ok', issues })
+  }
+  return report
+}
+
+/** Export a session even when it is un-resumable (decode zstd too). */
+export async function rescueSession(file) {
+  const md = await exportSession(file, 'md')
+  return { md, bytes: sessionBytes({ file }) }
+}
+
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
