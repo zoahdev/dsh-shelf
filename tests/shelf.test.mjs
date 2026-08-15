@@ -11,10 +11,12 @@ import {
   archiveOlderThan,
   renderReportHtml,
   reportSessions,
+  rescueSession,
   searchSessions,
   sessionStats,
   topSessions,
   tokenizeQuery,
+  verifySessions,
 } from '../engine/shelf.js'
 
 function tempRoot() {
@@ -185,6 +187,46 @@ test('renderReportHtml emits a self-contained dashboard', () => {
     assert.match(html, /Sessions per day/)
     assert.match(html, /Largest sessions/)
     assert.match(html, /<html/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('verifySessions detects orphan tool calls and unfinished turns (#1959/#2034)', () => {
+  const root = tempRoot()
+  try {
+    writeSession(root, 'broken', [
+      { type: 'turn/start' },
+      { type: 'tool/call', data: { name: 'bash' } },
+    ])
+    writeSession(root, 'fine', [
+      { type: 'turn/start' },
+      { type: 'tool/call', data: { name: 'bash' } },
+      { type: 'tool/result', data: {} },
+      { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+    ], Date.now())
+    const report = verifySessions(join(root, 'sessions'))
+    const broken = report.find(entry => entry.id === 'broken')
+    const fine = report.find(entry => entry.id === 'fine')
+    assert.equal(broken.status, 'unhealthy')
+    assert.ok(broken.issues.some(issue => issue.includes('orphan tool call')))
+    assert.ok(broken.issues.some(issue => issue.includes('no turn/end')))
+    assert.equal(fine.status, 'ok')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('rescueSession exports content from an un-resumable session', async () => {
+  const root = tempRoot()
+  try {
+    const dir = writeSession(root, 'stuck', [
+      { type: 'turn/start' },
+      { type: 'user/message', data: { content: [{ type: 'text', text: 'precious context' }] } },
+      { type: 'tool/call', data: { name: 'bash' } },
+    ])
+    const { md } = await rescueSession(join(dir, 'session.jsonl'))
+    assert.match(md, /precious context/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
