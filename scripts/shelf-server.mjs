@@ -11,6 +11,7 @@ import {
   exportSession,
   listSessions,
   moveSession,
+  reportSessions,
   searchSessions,
   sessionStats,
 } from '../engine/shelf.js'
@@ -28,6 +29,11 @@ export function createShelfServer(root, archive, trash) {
       }
       if (url.pathname === '/api/search') {
         res.end(JSON.stringify(searchSessions(root, url.searchParams.get('q') ?? '')))
+        return
+      }
+      if (url.pathname === '/api/report') {
+        const days = Number(url.searchParams.get('days') ?? 14)
+        res.end(JSON.stringify(reportSessions(root, Number.isInteger(days) && days > 0 ? days : 14)))
         return
       }
       if (url.pathname === '/api/export') {
