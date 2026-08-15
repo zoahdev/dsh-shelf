@@ -149,8 +149,19 @@ export function writeExport(file, content) {
   writeFileSync(file, content)
 }
 
+/** Tokenize a search query: ASCII words + CJK bigrams (zero-dependency Chinese search). */
+export function tokenizeQuery(query) {
+  const lower = query.toLowerCase()
+  const words = lower.match(/[a-z0-9_]+/g) ?? []
+  const cjk = [...lower].filter(ch => /[\u4e00-\u9fff]/u.test(ch))
+  const bigrams = []
+  for (let i = 0; i < cjk.length - 1; i += 1) bigrams.push(cjk[i] + cjk[i + 1])
+  const singles = cjk.length === 1 ? cjk : []
+  return [...new Set([...words, ...bigrams, ...singles])]
+}
+
 export function searchSessions(root, query) {
-  const needle = query.toLowerCase()
+  const tokens = tokenizeQuery(query)
   const hits = []
   for (const session of listSessions(root)) {
     if (session.compressed) continue
@@ -160,9 +171,19 @@ export function searchSessions(root, query) {
     } catch {
       continue
     }
-    const headerHit = `${session.id ?? ''} ${session.title ?? ''}`.toLowerCase().includes(needle)
-    const bodyHit = text.toLowerCase().includes(needle)
-    if (headerHit || bodyHit) hits.push({ id: session.id ?? session.dir, file: session.file, headerHit, bodyHit })
+    const lowerText = text.toLowerCase()
+    const header = `${session.id ?? ''} ${session.title ?? ''}`.toLowerCase()
+    const headerHits = tokens.filter(token => header.includes(token)).length
+    const bodyHits = tokens.filter(token => lowerText.includes(token)).length
+    const matched = tokens.length > 0 && headerHits + bodyHits >= tokens.length
+    if (matched || (tokens.length === 0 && header === '')) {
+      hits.push({
+        id: session.id ?? session.dir,
+        file: session.file,
+        headerHit: headerHits > 0,
+        bodyHit: bodyHits > 0,
+      })
+    }
   }
   return hits
 }
