@@ -7,6 +7,8 @@ import {
   exportSession,
   listSessions,
   moveSession,
+  archiveOlderThan,
+  reportSessions,
   searchSessions,
   sessionStats,
 } from '../engine/shelf.js'
@@ -15,11 +17,11 @@ function tempRoot() {
   return mkdtempSync(join(tmpdir(), 'dsh-shelf-'))
 }
 
-function writeSession(root, id, events) {
+function writeSession(root, id, events, createdAt = 1000) {
   const dir = join(root, 'sessions', 'p', id)
   mkdirSync(dir, { recursive: true })
   const lines = [
-    JSON.stringify({ type: 'session', version: 0, id, createdAt: 1000 }),
+    JSON.stringify({ type: 'session', version: 0, id, createdAt }),
     ...events.map(event => JSON.stringify(event)),
   ]
   writeFileSync(join(dir, 'session.jsonl'), lines.join('\n') + '\n')
@@ -98,6 +100,42 @@ test('searchSessions matches header and body text', () => {
     assert.equal(hits.length, 1)
     assert.equal(hits[0].id, 'alpha')
     assert.equal(hits[0].bodyHit, true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('reportSessions buckets sessions by creation day', () => {
+  const root = tempRoot()
+  try {
+    writeSession(root, 'today', [{ type: 'turn/start' }])
+    const dir = join(root, 'sessions', 'p', 'old')
+    mkdirSync(dir, { recursive: true })
+    const createdAt = Date.now() - 3 * 24 * 60 * 60 * 1000
+    writeFileSync(join(dir, 'session.jsonl'), JSON.stringify({ type: 'session', version: 0, id: 'old', createdAt }) + '\n')
+    const report = reportSessions(join(root, 'sessions'), 7)
+    assert.equal(report.total, 2)
+    const oldDay = new Date(createdAt).toISOString().slice(0, 10)
+    assert.equal(report.byDay.find(day => day.day === oldDay)?.created, 1)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('archiveOlderThan moves only sessions past the cutoff', () => {
+  const root = tempRoot()
+  try {
+    writeSession(root, 'recent', [{ type: 'turn/start' }], Date.now())
+    const dir = join(root, 'sessions', 'p', 'old')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'session.jsonl'), JSON.stringify({
+      type: 'session', version: 0, id: 'old',
+      createdAt: Date.now() - 40 * 24 * 60 * 60 * 1000,
+    }) + '\n')
+    const moved = archiveOlderThan(join(root, 'sessions'), join(root, 'archive'), 30)
+    assert.equal(moved.length, 1)
+    assert.equal(moved[0].id, 'old')
+    assert.equal(listSessions(join(root, 'sessions')).length, 1)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
