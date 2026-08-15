@@ -12,6 +12,7 @@
  */
 
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { createZstdDecompress } from 'node:zlib'
 import { join } from 'node:path'
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
@@ -87,10 +88,10 @@ export function sessionStats(root) {
   }
 }
 
-export function exportSession(file, format = 'md') {
+export async function exportSession(file, format = 'md') {
   const buffer = readFileSync(file)
   if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_MAGIC)) {
-    throw new Error(`session ${file} is Zstandard-compressed; export supports plain JSONL in v0.1`)
+    return exportZstd(file, buffer, format)
   }
   const lines = buffer.toString('utf8').split(/\r?\n/u).filter(line => line.trim() !== '')
   const events = []
@@ -104,6 +105,40 @@ export function exportSession(file, format = 'md') {
   if (format === 'jsonl') return lines.join('\n') + '\n'
   if (format === 'json') return JSON.stringify(events, null, 2) + '\n'
   return renderMarkdown(events)
+}
+
+/**
+ * Decode a Zstandard session log with node:zlib (Node >= 22.19 exposes
+ * createZstdDecompress) and re-run the export pipeline on the plaintext.
+ */
+function exportZstd(file, buffer, format) {
+  try {
+    const decompress = createZstdDecompress()
+    const chunks = []
+    decompress.on('data', chunk => chunks.push(chunk))
+    const done = new Promise((resolve, reject) => {
+      decompress.on('end', resolve)
+      decompress.on('error', reject)
+    })
+    decompress.end(buffer)
+    return done.then(() => {
+      const plain = Buffer.concat(chunks)
+      const lines = plain.toString('utf8').split(/\r?\n/u).filter(line => line.trim() !== '')
+      const events = []
+      for (const line of lines) {
+        try {
+          events.push(JSON.parse(line))
+        } catch {
+          // non-JSON tail bytes are ignored
+        }
+      }
+      if (format === 'jsonl') return lines.join('\n') + '\n'
+      if (format === 'json') return JSON.stringify(events, null, 2) + '\n'
+      return renderMarkdown(events)
+    })
+  } catch (error) {
+    throw new Error(`session ${file} is Zstandard-compressed and this Node cannot decode it: ${String(error)}`)
+  }
 }
 
 function renderMarkdown(events) {
