@@ -24,10 +24,12 @@ import {
   listSessions,
   moveSession,
   archiveOlderThan,
+  renderReportHtml,
   renderReport,
   reportSessions,
   searchSessions,
   sessionStats,
+  topSessions,
   writeExport,
 } from '../engine/shelf.js'
 import { createShelfServer } from './shelf-server.mjs'
@@ -103,7 +105,15 @@ if (command === 'export') {
 if (command === 'report') {
   const days = Number(args._[1] ?? 7)
   const report = reportSessions(root, Number.isInteger(days) && days > 0 ? days : 7)
-  if (args.format === 'json' || args.json) {
+  if (args.format === 'html') {
+    const html = renderReportHtml(report, topSessions(root, 5))
+    if (args.out !== null) {
+      writeExport(resolve(args.out), html)
+      console.log(`report -> ${resolve(args.out)}`)
+    } else {
+      process.stdout.write(html)
+    }
+  } else if (args.format === 'json' || args.json) {
     console.log(JSON.stringify(report, null, 2))
   } else {
     console.log(renderReport(report))
