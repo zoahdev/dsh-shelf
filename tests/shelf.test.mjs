@@ -11,6 +11,7 @@ import {
   reportSessions,
   searchSessions,
   sessionStats,
+  tokenizeQuery,
 } from '../engine/shelf.js'
 
 function tempRoot() {
@@ -100,6 +101,32 @@ test('searchSessions matches header and body text', () => {
     assert.equal(hits.length, 1)
     assert.equal(hits[0].id, 'alpha')
     assert.equal(hits[0].bodyHit, true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('tokenizeQuery builds ASCII words and CJK bigrams for Chinese search', () => {
+  assert.deepEqual(tokenizeQuery('parser bug'), ['parser', 'bug'])
+  const tokens = tokenizeQuery('修复解析器')
+  assert.ok(tokens.includes('修复'))
+  assert.ok(tokens.includes('复解'))
+  assert.ok(tokens.includes('解析'))
+  assert.ok(tokens.includes('析器'))
+})
+
+test('searchSessions finds Chinese sessions by bigram', () => {
+  const root = tempRoot()
+  try {
+    writeSession(root, 'cn', [
+      { type: 'user/message', data: { content: [{ type: 'text', text: '修复解析器的缓存问题' }] } },
+    ])
+    writeSession(root, 'other', [
+      { type: 'user/message', data: { content: [{ type: 'text', text: '无关内容' }] } },
+    ])
+    const hits = searchSessions(join(root, 'sessions'), '解析器')
+    assert.equal(hits.length, 1)
+    assert.equal(hits[0].id, 'cn')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
