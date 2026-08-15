@@ -19,6 +19,8 @@ npx dsh-shelf restore-trash <id>
 npx dsh-shelf report                        # weekly session digest (Markdown)
 npx dsh-shelf report 30 --format json       # 30-day digest as JSON
 npx dsh-shelf report 14 --format html --out shelf-report.html   # offline dashboard
+npx dsh-shelf verify                        # session health check (orphan tool calls, unfinished, empty)
+npx dsh-shelf rescue <id>                   # export an un-resumable session's content
 npx dsh-shelf archive-old 30                # dry run: sessions older than 30 days
 npx dsh-shelf archive-old 30 --yes          # move them to sessions-archive
 npx dsh-shelf web                           # local web panel at http://127.0.0.1:4174
@@ -61,6 +63,7 @@ node scripts/shelf.mjs list --root <fixtures>
 - [x] offline HTML dashboard (`report --format html`) - shareable per-day bars + largest sessions
 - [x] Chinese search via CJK bigram tokenizer (zero-dependency; aligns with #1999)
 - [x] DSH plugin wrapper (`dsh plugin add github:zoahdev/dsh-shelf` opens the panel)
+- [x] session health check (`verify`) + rescue export for un-resumable sessions (#1959/#2034 family)
 - [ ] FTS5-backed search when the host provides SQLite FTS5
 - [x] Zstandard export (node:zlib decode on Node >= 22.19)
 
