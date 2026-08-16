@@ -12,10 +12,72 @@
  */
 
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { createZstdDecompress } from 'node:zlib'
+import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 
-const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+const ZSTD_FILE_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+const ZSTD_FRAME_MAGIC = 0xfd2fb528
+
+/**
+ * Structurally scan a concatenated-Zstandard container into complete frames.
+ * Unlike a one-shot `zstdDecompressSync`, this tolerates a torn final frame
+ * (a crash/power-loss mid-write) instead of throwing, so `rescue` can still
+ * salvage every complete frame that came before it.
+ */
+function scanZstdFrames(buffer) {
+  const frames = []
+  let offset = 0
+  while (offset < buffer.length) {
+    const start = offset
+    if (buffer.length - offset < 4) break
+    if (buffer.readUInt32LE(offset) !== ZSTD_FRAME_MAGIC) break
+    offset += 4
+    const descriptor = buffer.readUInt8(offset++)
+    if ((descriptor & 0x18) !== 0) break
+    const contentSizeFlag = descriptor >>> 6
+    const singleSegment = (descriptor & 0x20) !== 0
+    const checksum = (descriptor & 0x04) !== 0
+    const dictionaryFlag = descriptor & 0x03
+    const dictionaryBytes = dictionaryFlag === 3 ? 4 : dictionaryFlag
+    const contentSizeBytes = contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : (1 << contentSizeFlag)
+    const remainingHeaderBytes = (singleSegment ? 0 : 1) + dictionaryBytes + contentSizeBytes
+    if (buffer.length - offset < remainingHeaderBytes) break
+    offset += remainingHeaderBytes
+    let complete = true
+    for (;;) {
+      if (buffer.length - offset < 3) { complete = false; break }
+      const blockHeader = buffer.readUIntLE(offset, 3)
+      offset += 3
+      const lastBlock = (blockHeader & 1) !== 0
+      const blockType = (blockHeader >>> 1) & 0x03
+      const blockSize = blockHeader >>> 3
+      if (blockType === 0x03) { complete = false; break }
+      const payloadBytes = blockType === 0x01 ? 1 : blockSize
+      if (buffer.length - offset < payloadBytes) { complete = false; break }
+      offset += payloadBytes
+      if (lastBlock) break
+    }
+    if (checksum) {
+      if (buffer.length - offset < 4) { complete = false } else { offset += 4 }
+    }
+    if (complete) frames.push({ start, end: offset })
+    else break
+  }
+  return frames
+}
+
+/** Decompress every complete frame, skipping any frame that fails to decode. */
+function decompressContainer(buffer) {
+  let out = ''
+  for (const frame of scanZstdFrames(buffer)) {
+    try {
+      out += zstdDecompressSync(buffer.subarray(frame.start, frame.end)).toString('utf8')
+    } catch {
+      // skip a corrupt frame, keep the rest
+    }
+  }
+  return out
+}
 
 export function sessionFiles(root) {
   const out = []
@@ -47,7 +109,7 @@ export function sessionFiles(root) {
 function readHeader(file) {
   try {
     const buffer = readFileSync(file)
-    if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_MAGIC)) {
+    if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_FILE_MAGIC)) {
       return { compressed: true, id: undefined, createdAt: undefined }
     }
     const line = buffer.toString('utf8').split(/\r?\n/u, 1)[0]
@@ -98,8 +160,8 @@ export function topSessions(root, limit = 5) {
 
 export async function exportSession(file, format = 'md') {
   const buffer = readFileSync(file)
-  if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_MAGIC)) {
-    return exportZstd(file, buffer, format)
+  if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_FILE_MAGIC)) {
+    return exportZstd(buffer, format)
   }
   const lines = buffer.toString('utf8').split(/\r?\n/u).filter(line => line.trim() !== '')
   const events = []
@@ -119,34 +181,20 @@ export async function exportSession(file, format = 'md') {
  * Decode a Zstandard session log with node:zlib (Node >= 22.19 exposes
  * createZstdDecompress) and re-run the export pipeline on the plaintext.
  */
-function exportZstd(file, buffer, format) {
-  try {
-    const decompress = createZstdDecompress()
-    const chunks = []
-    decompress.on('data', chunk => chunks.push(chunk))
-    const done = new Promise((resolve, reject) => {
-      decompress.on('end', resolve)
-      decompress.on('error', reject)
-    })
-    decompress.end(buffer)
-    return done.then(() => {
-      const plain = Buffer.concat(chunks)
-      const lines = plain.toString('utf8').split(/\r?\n/u).filter(line => line.trim() !== '')
-      const events = []
-      for (const line of lines) {
-        try {
-          events.push(JSON.parse(line))
-        } catch {
-          // non-JSON tail bytes are ignored
-        }
-      }
-      if (format === 'jsonl') return lines.join('\n') + '\n'
-      if (format === 'json') return JSON.stringify(events, null, 2) + '\n'
-      return renderMarkdown(events)
-    })
-  } catch (error) {
-    throw new Error(`session ${file} is Zstandard-compressed and this Node cannot decode it: ${String(error)}`)
+function exportZstd(buffer, format) {
+  const plain = decompressContainer(buffer)
+  const lines = plain.split(/\r?\n/u).filter(line => line.trim() !== '')
+  const events = []
+  for (const line of lines) {
+    try {
+      events.push(JSON.parse(line))
+    } catch {
+      // non-JSON tail bytes are ignored for export
+    }
   }
+  if (format === 'jsonl') return lines.join('\n') + '\n'
+  if (format === 'json') return JSON.stringify(events, null, 2) + '\n'
+  return renderMarkdown(events)
 }
 
 function renderMarkdown(events) {
