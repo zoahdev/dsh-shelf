@@ -105,6 +105,38 @@ test('exportSession decodes Zstandard session logs via node:zlib', async () => {
   }
 })
 
+test('exportSession salvages complete frames before a torn (crash-truncated) zstd frame', async () => {
+  const root = tempRoot()
+  try {
+    const compress = (s) => new Promise((resolve, reject) => {
+      const stream = createZstdCompress()
+      const chunks = []
+      stream.on('data', chunk => chunks.push(chunk))
+      stream.on('end', () => resolve(Buffer.concat(chunks)))
+      stream.on('error', reject)
+      stream.end(s)
+    })
+    const frame1 = await compress([
+      JSON.stringify({ type: 'session', version: 0, id: 'torn', createdAt: 1000 }),
+      JSON.stringify({ type: 'user/message', data: { content: [{ type: 'text', text: 'salvaged hello' }] } }),
+      '',
+    ].join('\n'))
+    const frame2 = await compress([
+      JSON.stringify({ type: 'user/message', data: { content: [{ type: 'text', text: 'LOST tail' }] } }),
+      '',
+    ].join('\n'))
+    const torn = Buffer.concat([frame1, frame2]).subarray(0, frame1.length + frame2.length - 5)
+    const dir = join(root, 'sessions', 'p', 'torn')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'session.jsonl'), torn)
+    const md = await exportSession(join(dir, 'session.jsonl'), 'md')
+    assert.match(md, /salvaged hello/)
+    assert.doesNotMatch(md, /LOST tail/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('moveSession archives and restores without deleting', () => {
   const root = tempRoot()
   try {
