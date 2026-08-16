@@ -1,6 +1,6 @@
 {
   "name": "dsh-shelf",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Session lifecycle for DeepSeek Harness: export, archive, restore, trash, search, and stats for your dsh session library. Zero dependencies, read-only by default.",
   "type": "module",
   "main": "lib/index.js",
@@ -31,7 +31,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=22.19"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"
