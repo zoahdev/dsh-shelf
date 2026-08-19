@@ -35,6 +35,28 @@ function writeSession(root, id, events, createdAt = 1000) {
   return dir
 }
 
+async function compressZstd(plain) {
+  return new Promise((resolve, reject) => {
+    const stream = createZstdCompress()
+    const chunks = []
+    stream.on('data', chunk => chunks.push(chunk))
+    stream.on('end', () => resolve(Buffer.concat(chunks)))
+    stream.on('error', reject)
+    stream.end(plain)
+  })
+}
+
+async function writeZstdSession(root, id, events, createdAt = 1000, name = 'session.jsonl.zstd') {
+  const dir = join(root, 'sessions', 'p', id)
+  mkdirSync(dir, { recursive: true })
+  const lines = [
+    JSON.stringify({ type: 'session', version: 0, id, createdAt }),
+    ...events.map(event => JSON.stringify(event)),
+  ]
+  writeFileSync(join(dir, name), await compressZstd(lines.join('\n') + '\n'))
+  return dir
+}
+
 test('host plugin uses dshHomePath without probing an uninjected baseDir service', () => {
   const root = tempRoot()
   const messages = []
@@ -65,6 +87,49 @@ test('listSessions finds session files and parses headers', () => {
     assert.equal(sessions.length, 1)
     assert.equal(sessions[0].id, 's1')
     assert.equal(sessions[0].createdAt, 1000)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('listSessions finds DSH session.jsonl.zstd logs and parses their headers', async () => {
+  const root = tempRoot()
+  try {
+    const dir = await writeZstdSession(root, 'z1', [{ type: 'turn/start' }], 2000)
+    const sessions = listSessions(join(root, 'sessions'))
+    assert.equal(sessions.length, 1)
+    assert.equal(sessions[0].id, 'z1')
+    assert.equal(sessions[0].createdAt, 2000)
+    assert.equal(sessions[0].compressed, true)
+    assert.equal(sessions[0].file, join(dir, 'session.jsonl.zstd'))
+    assert.equal(sessions[0].dir, dir)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('listSessions returns newest createdAt first', () => {
+  const root = tempRoot()
+  try {
+    writeSession(root, 'old', [{ type: 'turn/start' }], 1000)
+    writeSession(root, 'mid', [{ type: 'turn/start' }], 2000)
+    writeSession(root, 'new', [{ type: 'turn/start' }], 3000)
+    const sessions = listSessions(join(root, 'sessions'))
+    assert.deepEqual(sessions.map(session => session.id), ['new', 'mid', 'old'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('listSessions prefers session.jsonl.zstd when both log names exist', async () => {
+  const root = tempRoot()
+  try {
+    writeSession(root, 'both', [{ type: 'turn/start' }], 1000)
+    await writeZstdSession(root, 'both', [{ type: 'turn/start' }], 3000)
+    const sessions = listSessions(join(root, 'sessions'))
+    assert.equal(sessions.length, 1)
+    assert.equal(sessions[0].createdAt, 3000)
+    assert.match(sessions[0].file, /session\.jsonl\.zstd$/u)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

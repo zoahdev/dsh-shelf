@@ -13,10 +13,12 @@
 
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const ZSTD_FILE_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 const ZSTD_FRAME_MAGIC = 0xfd2fb528
+const SESSION_LOG_PLAIN = 'session.jsonl'
+const SESSION_LOG_ZSTD = 'session.jsonl.zstd'
 
 /**
  * Structurally scan a concatenated-Zstandard container into complete frames.
@@ -98,37 +100,56 @@ export function sessionFiles(root) {
         // broken links / unreadable dirs are skipped
       }
     }
-    for (const entry of entries) {
-      if (entry === 'session.jsonl') out.push(join(dir, entry))
-    }
+    // Current DSH writes compressed logs as session.jsonl.zstd; older/plain
+    // sessions stay session.jsonl. Prefer the zstd name when both exist.
+    if (entries.includes(SESSION_LOG_ZSTD)) out.push(join(dir, SESSION_LOG_ZSTD))
+    else if (entries.includes(SESSION_LOG_PLAIN)) out.push(join(dir, SESSION_LOG_PLAIN))
   }
   walk(root, 0)
   return out
+}
+
+function parseHeaderLine(line, compressed) {
+  if (line === undefined || line.trim() === '') return { compressed, id: undefined, createdAt: undefined }
+  const header = JSON.parse(line)
+  return {
+    compressed,
+    id: typeof header.id === 'string' ? header.id : undefined,
+    createdAt: typeof header.createdAt === 'number' ? header.createdAt : undefined,
+    title: typeof header.title === 'string' ? header.title : undefined,
+    parentSession: typeof header.parentSession === 'string' ? header.parentSession : undefined,
+    seedLength: typeof header.seedLength === 'number' ? header.seedLength : undefined,
+  }
+}
+
+function firstZstdLine(buffer) {
+  const frames = scanZstdFrames(buffer)
+  if (frames.length === 0) return undefined
+  const plain = zstdDecompressSync(buffer.subarray(frames[0].start, frames[0].end)).toString('utf8')
+  return plain.split(/\r?\n/u, 1)[0]
 }
 
 function readHeader(file) {
   try {
     const buffer = readFileSync(file)
     if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_FILE_MAGIC)) {
-      return { compressed: true, id: undefined, createdAt: undefined }
+      return parseHeaderLine(firstZstdLine(buffer), true)
     }
     const line = buffer.toString('utf8').split(/\r?\n/u, 1)[0]
-    if (line === undefined || line.trim() === '') return { compressed: false, id: undefined, createdAt: undefined }
-    const header = JSON.parse(line)
-    return {
-      compressed: false,
-      id: typeof header.id === 'string' ? header.id : undefined,
-      createdAt: typeof header.createdAt === 'number' ? header.createdAt : undefined,
-      title: typeof header.title === 'string' ? header.title : undefined,
-    }
+    return parseHeaderLine(line, false)
   } catch {
-    return { compressed: false, id: undefined, createdAt: undefined }
+    return { compressed: file.endsWith('.zstd'), id: undefined, createdAt: undefined }
   }
+}
+
+function byNewest(a, b) {
+  return (b.createdAt ?? 0) - (a.createdAt ?? 0)
 }
 
 export function listSessions(root) {
   return sessionFiles(root)
-    .map(file => ({ file, dir: file.slice(0, -'session.jsonl'.length), ...readHeader(file) }))
+    .map(file => ({ file, dir: dirname(file), ...readHeader(file) }))
+    .sort(byNewest)
 }
 
 export function sessionStats(root) {
