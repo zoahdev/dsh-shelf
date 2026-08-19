@@ -29,6 +29,19 @@
     .chart { display:flex; align-items:flex-end; gap:4px; height:72px; margin-bottom:18px; }
     .chart .bar { flex:1; background:linear-gradient(180deg,var(--accent),#9b5de5); border-radius:4px 4px 0 0; min-width:2px; }
     .chart .bar:hover { filter:brightness(1.2); }
+    .row.selected { outline:1px solid var(--accent); }
+    .overlay { position:fixed; inset:0; background:rgba(8,10,20,.72); display:none; align-items:center; justify-content:center; padding:24px; z-index:10; }
+    .overlay.open { display:flex; }
+    .panel { width:min(820px,100%); max-height:86vh; background:var(--card); border:1px solid var(--line); border-radius:16px; display:flex; flex-direction:column; }
+    .panel:focus { outline:2px solid var(--accent); outline-offset:-2px; }
+    .panel h2 { margin:0; padding:14px 16px 4px; font-size:16px; }
+    .panel .hint { color:var(--muted); font-size:12px; padding:0 16px 10px; }
+    #tree-close { align-self:flex-start; margin:0 16px 10px; padding:6px 10px; font-size:12px; }
+    .tree { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; overflow:auto; padding:0 8px 8px; }
+    .tree .n { padding:3px 10px; border-radius:8px; white-space:pre; cursor:pointer; }
+    .tree .n.cur { background:#2a3358; }
+    .tree .n.leaf::after { content:' ←'; color:var(--accent); }
+    .preview { border-top:1px solid var(--line); margin:0; height:auto; max-height:min(36vh, 280px); overflow-x:hidden; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; border-radius:0 0 16px 16px; }
   </style>
 </head>
 <body>
@@ -46,14 +59,24 @@
       <input type="text" id="q" placeholder="Search: parser bug / 解析器 缓存…">
       <button id="search">Search</button>
       <button class="ghost" id="refresh">Refresh</button>
+      <button class="ghost" id="lineage">Tree</button>
     </div>
     <div id="list"></div>
     <pre id="out" style="display:none"></pre>
-    <p class="notice">Moves are reversible (archive/trash → restore). Export is read-only. Data never leaves this machine.</p>
+    <p class="notice">Moves are reversible (archive/trash → restore). Export is read-only. Double-Esc opens message navigation (pi /tree). Data never leaves this machine.</p>
+  </div>
+  <div class="overlay" id="overlay">
+    <div class="panel" id="tree-panel" role="dialog" aria-modal="true" aria-labelledby="tree-title" tabindex="-1">
+      <h2 id="tree-title">Session tree</h2>
+      <p class="hint" id="tree-hint">↑/↓ move · Enter preview · o filter · Esc close · Double-Esc from the list</p>
+      <button class="ghost" id="tree-close" type="button">Close</button>
+      <div class="tree" id="tree"></div>
+      <pre class="preview" id="preview" style="display:none"></pre>
+    </div>
   </div>
   <script>
     const $ = id => document.getElementById(id)
-    async function api(path, options) {
+    async function api(path, options = {}) {
       const res = await fetch(path, options)
       if (!res.ok) throw new Error(await res.text())
       const text = await res.text()
@@ -77,20 +100,150 @@
       if (bytes < 1048576) return (bytes/1024).toFixed(1) + ' KB'
       return (bytes/1048576).toFixed(1) + ' MB'
     }
+    let listed = []
+    let selectedId = ''
+    let lastEsc = 0
+    let treeState = null
+    let treeReq = 0
+    let treeAbort = null
+    let lastFocus = null
+    function prefixOf(n) {
+      if ((n.indent ?? 0) === 0 && !n.showConnector) return ''
+      let out = ''
+      for (let level = 0; level < n.indent; level += 1) {
+        if (level === n.indent - 1 && n.showConnector) out += n.isLast ? '└─ ' : '├─ '
+        else out += n.gutters?.find(g => g.position === level)?.show ? '│  ' : '   '
+      }
+      return out
+    }
     function render(sessions) {
-      const listed = [...sessions].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+      listed = [...sessions].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
       const list = $('list')
       if (listed.length === 0) { list.innerHTML = '<div class="empty">No sessions found.</div>'; return }
+      if (!listed.some(s => s.id === selectedId)) selectedId = listed[0]?.id ?? ''
       list.innerHTML = listed.map(s => `
-        <div class="row">
+        <div class="row${s.id === selectedId ? ' selected' : ''}" data-id="${esc(s.id ?? '')}">
           <span class="id">${esc(s.id ?? '(no id)')}${s.compressed ? ' <small>[zstd]</small>' : ''}</span>
           <span class="meta">${esc(s.file)}</span>
           <span class="actions">
-            <button onclick="doExport(${JSON.stringify(s.id ?? '')})">Export</button>
-            <button onclick="doMove(${JSON.stringify(s.id ?? '')},'archive')">Archive</button>
-            <button onclick="doMove(${JSON.stringify(s.id ?? '')},'trash')">Trash</button>
+            <button type="button" data-action="tree">Tree</button>
+            <button type="button" data-action="export">Export</button>
+            <button type="button" data-action="archive">Archive</button>
+            <button type="button" data-action="trash">Trash</button>
           </span>
         </div>`).join('')
+      list.querySelectorAll('.row').forEach(row => {
+        row.addEventListener('click', ev => {
+          const action = ev.target.closest('button')?.dataset.action
+          if (action === 'tree') {
+            void openTree(row.dataset.id)
+            return
+          }
+          if (action === 'export') { void doExport(row.dataset.id); return }
+          if (action === 'archive') { void doMove(row.dataset.id, 'archive'); return }
+          if (action === 'trash') { void doMove(row.dataset.id, 'trash'); return }
+          if (action) return
+          selectedId = row.dataset.id
+          render(listed)
+        })
+      })
+    }
+    function closeTree() {
+      treeReq += 1
+      treeAbort?.abort()
+      treeAbort = null
+      treeState = null
+      $('overlay').classList.remove('open')
+      document.querySelector('.wrap')?.removeAttribute('inert')
+      lastFocus?.focus?.()
+    }
+    function clipAt(text, max) {
+      const one = String(text ?? '').replace(/\s+/g, ' ').trim()
+      if (one.length <= max) return one
+      return one.slice(0, Math.max(1, max - 1)) + '…'
+    }
+    function paintTree() {
+      if (!treeState) return
+      const { nodes, cursor, leafId } = treeState
+      const cols = Math.max(16, Math.floor(($('tree').clientWidth || 480) / 8))
+      $('tree').innerHTML = nodes.map((n, i) => {
+        const prefix = prefixOf(n)
+        const role = n.role === 'session' ? '' : `${n.role}: `
+        const raw = n.role === 'assistant' && !n.text ? '(no content)' : (n.text || n.preview || '')
+        const mark = n.id === leafId ? 2 : 0
+        const label = role + clipAt(raw, Math.max(8, cols - prefix.length - role.length - mark))
+        return `<div class="n${i === cursor ? ' cur' : ''}${n.id === leafId ? ' leaf' : ''}" data-i="${i}">${esc(prefix + label)}</div>`
+      }).join('') || '<div class="empty">No messages.</div>'
+      const cur = $('tree').querySelector('.cur')
+      cur?.scrollIntoView({ block: 'nearest' })
+      const node = nodes[cursor]
+      const preview = $('preview')
+      if (node?.text && node.role !== 'session') {
+        preview.style.display = 'block'
+        preview.textContent = node.text
+      } else {
+        preview.style.display = 'none'
+      }
+    }
+    async function openTree(id, opts = {}) {
+      selectedId = id || selectedId || listed[0]?.id || ''
+      const keepId = opts.keepId
+      const filter = opts.filter ?? treeState?.filter ?? 'no-tool'
+      const lineage = opts.lineage === true || id === ''
+      const path = lineage || !selectedId
+        ? '/api/tree'
+        : '/api/tree?id=' + encodeURIComponent(selectedId) + '&filter=' + encodeURIComponent(filter)
+      const req = ++treeReq
+      treeAbort?.abort()
+      treeAbort = new AbortController()
+      lastFocus = document.activeElement
+      let data
+      try {
+        data = await api(path, { signal: treeAbort.signal })
+      } catch (error) {
+        if (error?.name === 'AbortError') return
+        throw error
+      }
+      if (req !== treeReq) return
+      const nodes = data.nodes ?? []
+      let cursor = keepId ? nodes.findIndex(n => n.id === keepId) : -1
+      if (cursor < 0) cursor = nodes.findIndex(n => n.id === data.leafId)
+      if (cursor < 0) cursor = Math.max(0, nodes.length - 1)
+      treeState = {
+        kind: data.kind,
+        id: data.id ?? selectedId,
+        leafId: data.leafId,
+        nodes,
+        cursor,
+        filter: data.filter ?? filter,
+        filters: data.filters ?? ['no-tool', 'user', 'all'],
+      }
+      const label = data.kind === 'lineage' ? 'Session lineage' : `Messages · ${data.id ?? selectedId}`
+      $('tree-title').textContent = data.kind === 'lineage' ? label : `${label} · ${treeState.filter}`
+      $('tree-hint').textContent = data.kind === 'lineage'
+        ? '↑/↓ move · Enter open · Esc close'
+        : '↑/↓ move · Enter preview · o filter (no-tool → user → all) · Esc close'
+      $('overlay').classList.add('open')
+      document.querySelector('.wrap')?.setAttribute('inert', '')
+      $('tree-panel').focus()
+      paintTree()
+    }
+    async function cycleTreeFilter() {
+      if (!treeState || treeState.kind === 'lineage') return
+      const order = treeState.filters ?? ['no-tool', 'user', 'all']
+      const next = order[(order.indexOf(treeState.filter) + 1 + order.length) % order.length] ?? 'no-tool'
+      const keepId = treeState.nodes[treeState.cursor]?.id
+      await openTree(treeState.id, { filter: next, keepId })
+    }
+    async function activateTreeNode() {
+      if (!treeState) return
+      const node = treeState.nodes[treeState.cursor]
+      if (!node) return
+      if (treeState.kind === 'lineage' || node.role === 'session') {
+        await openTree(node.sessionId || node.id)
+        return
+      }
+      paintTree()
     }
     async function doExport(id) {
       const text = await api('/api/export?id=' + encodeURIComponent(id) + '&format=md')
@@ -112,7 +265,54 @@
       render(hits.map(h => ({ id: h.id, file: h.file, compressed: false, createdAt: h.createdAt })))
     })
     $('refresh').addEventListener('click', load)
+    $('lineage').addEventListener('click', () => openTree('', { lineage: true }))
+    $('tree-close').addEventListener('click', closeTree)
     $('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('search').click() })
+    $('overlay').addEventListener('click', e => { if (e.target.id === 'overlay') closeTree() })
+    $('tree').addEventListener('click', e => {
+      const row = e.target.closest('.n')
+      if (!row || !treeState) return
+      treeState.cursor = Number(row.dataset.i)
+      paintTree()
+      activateTreeNode()
+    })
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        if (treeState) { closeTree(); lastEsc = 0; return }
+        const now = Date.now()
+        if (now - lastEsc < 500) {
+          lastEsc = 0
+          openTree(selectedId)
+        } else lastEsc = now
+        return
+      }
+      if (!treeState) return
+      if (e.key === 'Tab') {
+        const nodes = [...$('tree-panel').querySelectorAll('button, [href], input, [tabindex]:not([tabindex="-1"])')]
+        if (nodes.length === 0) return
+        const first = nodes[0]
+        const last = nodes[nodes.length - 1]
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); return }
+        if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); return }
+        return
+      }
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault()
+        treeState.cursor = Math.min(treeState.nodes.length - 1, treeState.cursor + 1)
+        paintTree()
+      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault()
+        treeState.cursor = Math.max(0, treeState.cursor - 1)
+        paintTree()
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        activateTreeNode()
+      } else if (e.key === 'o' || e.key === 'O') {
+        e.preventDefault()
+        cycleTreeFilter()
+      }
+    })
+    new ResizeObserver(() => { if (treeState) paintTree() }).observe($('tree'))
     load()
   </script>
 </body>
