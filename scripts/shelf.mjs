@@ -10,6 +10,7 @@
  *   dsh-shelf restore <id> --archive <root>
  *   dsh-shelf trash <id> [--trash <root>]
  *   dsh-shelf restore-trash <id> --trash <root>
+ *   dsh-shelf tree [id] [--filter no-tool|user|all]
  *
  * Defaults: root = $DSH_SESSIONS or ~/.dsh/sessions; archive/trash live next
  * to the root as `sessions-archive` / `sessions-trash`.
@@ -34,17 +35,19 @@ import {
   verifySessions,
   writeExport,
 } from '../engine/shelf.js'
+import { flattenTree, renderTree, sessionLineageTree, sessionMessageTree } from '../engine/tree.js'
 import { createShelfServer } from './shelf-server.mjs'
 
 function parseArgs(argv) {
-  const args = { _: [], root: null, archive: null, trash: null, format: 'md', out: null, all: false, yes: false }
+  const args = { _: [], root: null, archive: null, trash: null, format: 'md', out: null, filter: null, all: false, yes: false }
   for (let i = 0; i < argv.length; i += 1) {
     const value = argv[i]
-    if (value === '--root') args.root = argv[i + 1]
-    else if (value === '--archive') args.archive = argv[i + 1]
-    else if (value === '--trash') args.trash = argv[i + 1]
-    else if (value === '--format') args.format = argv[i + 1]
-    else if (value === '--out') args.out = argv[i + 1]
+    if (value === '--root') args.root = argv[++i]
+    else if (value === '--archive') args.archive = argv[++i]
+    else if (value === '--trash') args.trash = argv[++i]
+    else if (value === '--format') args.format = argv[++i]
+    else if (value === '--out') args.out = argv[++i]
+    else if (value === '--filter') args.filter = argv[++i]
     else if (value === '--all') args.all = true
     else if (value === '--yes') args.yes = true
     else args._.push(value)
@@ -162,6 +165,23 @@ if (command === 'archive-old') {
   const moved = archiveOlderThan(root, archive, days)
   console.log(`archived ${moved.length} session(s) older than ${days} days`)
   for (const entry of moved) console.log(`${entry.id}\t${entry.from} -> ${entry.to}`)
+  process.exit(0)
+}
+
+if (command === 'tree') {
+  const id = args._[1]
+  if (id === undefined) {
+    const { roots, sessions } = sessionLineageTree(root)
+    if (sessions === 0) {
+      console.log('(no sessions)')
+      process.exit(0)
+    }
+    const lines = renderTree(flattenTree(roots, { alwaysBranch: true }), { width: process.stdout.columns })
+    console.log(lines.join('\n'))
+    process.exit(0)
+  }
+  const tree = sessionMessageTree(root, id, { filter: args.filter, width: process.stdout.columns })
+  console.log(tree.lines.join('\n'))
   process.exit(0)
 }
 

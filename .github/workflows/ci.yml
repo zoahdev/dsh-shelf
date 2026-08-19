@@ -14,6 +14,6 @@ jobs:
         with:
           node-version: 22
       - name: Engine tests
-        run: node --test tests/shelf.test.mjs
+        run: node --test tests/*.test.mjs
       - name: CLI help smoke
         run: node scripts/shelf.mjs list --root /nonexistent || true

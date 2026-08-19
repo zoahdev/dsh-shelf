@@ -15,6 +15,7 @@ import {
   searchSessions,
   sessionStats,
 } from '../engine/shelf.js'
+import { flattenTree, renderTree, sessionLineageTree, sessionMessageTree } from '../engine/tree.js'
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'web')
 
@@ -34,6 +35,30 @@ export function createShelfServer(root, archive, trash) {
       if (url.pathname === '/api/report') {
         const days = Number(url.searchParams.get('days') ?? 14)
         res.end(JSON.stringify(reportSessions(root, Number.isInteger(days) && days > 0 ? days : 14)))
+        return
+      }
+      if (url.pathname === '/api/tree') {
+        const id = url.searchParams.get('id') ?? ''
+        if (id === '') {
+          const { roots, sessions } = sessionLineageTree(root)
+          const flat = flattenTree(roots, { alwaysBranch: true })
+          res.end(JSON.stringify({
+            kind: 'lineage',
+            sessions,
+            lines: renderTree(flat),
+            nodes: flat.map(row => ({
+              id: row.node.id,
+              preview: row.node.preview,
+              sessionId: row.node.sessionId,
+              indent: row.indent,
+              showConnector: row.showConnector,
+              isLast: row.isLast,
+              gutters: row.gutters,
+            })),
+          }))
+          return
+        }
+        res.end(JSON.stringify({ kind: 'messages', ...sessionMessageTree(root, id, { filter: url.searchParams.get('filter') }) }))
         return
       }
       if (url.pathname === '/api/export') {
