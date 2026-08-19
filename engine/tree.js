@@ -166,12 +166,14 @@ function collectFamily(logs, focusId) {
   const family = new Set()
   const seen = new Set()
   let cursor = focusId
+  let rootId = focusId
   while (cursor && byId.has(cursor) && !seen.has(cursor)) {
     seen.add(cursor)
     family.add(cursor)
+    rootId = cursor
     cursor = byId.get(cursor).header?.parentSession
   }
-  const stack = [focusId]
+  const stack = [rootId]
   while (stack.length > 0) {
     const id = stack.pop()
     family.add(id)
@@ -227,15 +229,15 @@ export function buildFamilyTree(logs, focusId) {
   }
 
   for (const log of topoSessions(family)) {
-    const seedEnd = seedEndOf(log.header)
+    const parent = typeof log.header?.parentSession === 'string'
+      ? byId.get(log.header.parentSession)
+      : undefined
+    const seedEnd = parent === undefined ? 0 : seedEndOf(log.header)
     const own = log.messages.filter(message => message.eventIndex >= seedEnd)
     let attach
-    if (typeof log.header?.parentSession === 'string' && seedEnd > 0) {
-      const parent = byId.get(log.header.parentSession)
-      if (parent !== undefined) {
-        const lastShared = [...parent.messages].reverse().find(message => message.eventIndex < seedEnd)
-        if (lastShared !== undefined) attach = owningNode(parent.id, lastShared.eventIndex)
-      }
+    if (parent !== undefined && seedEnd > 0) {
+      const lastShared = [...parent.messages].reverse().find(message => message.eventIndex < seedEnd)
+      if (lastShared !== undefined) attach = owningNode(parent.id, lastShared.eventIndex)
     }
     let prev = attach
     for (const message of own) {

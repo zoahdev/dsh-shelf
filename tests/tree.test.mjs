@@ -157,6 +157,39 @@ test('sessionMessageTree and lineage read on-disk sessions', () => {
   }
 })
 
+test('focused child still shows sibling forks', () => {
+  const parent = {
+    id: 'A',
+    header: { id: 'A' },
+    messages: messagesFromEvents([user('u1'), assistant('a1'), user('u2')]),
+  }
+  const childB = {
+    id: 'B',
+    header: { id: 'B', parentSession: 'A', seedLength: 2 },
+    messages: messagesFromEvents([user('u1'), assistant('a1'), user('b-only')]),
+  }
+  const childC = {
+    id: 'C',
+    header: { id: 'C', parentSession: 'A', seedLength: 2 },
+    messages: messagesFromEvents([user('u1'), assistant('a1'), user('c-only')]),
+  }
+  const lines = renderTree(flattenTree(buildFamilyTree([parent, childB, childC], 'B')))
+  assert.match(lines.join('\n'), /b-only/)
+  assert.match(lines.join('\n'), /c-only/)
+})
+
+test('orphan fork keeps inherited messages when the parent log is missing', () => {
+  const child = {
+    id: 'B',
+    header: { id: 'B', parentSession: 'A', seedLength: 2 },
+    messages: messagesFromEvents([user('u1'), assistant('a1'), user('b-only')]),
+  }
+  const lines = renderTree(flattenTree(buildFamilyTree([child], 'B')))
+  assert.match(lines.join('\n'), /u1/)
+  assert.match(lines.join('\n'), /a1/)
+  assert.match(lines.join('\n'), /b-only/)
+})
+
 test('liveMessageTree builds a picker list for the current agent', () => {
   const tree = liveMessageTree([user('ask', 1), assistant('ans', 2)], 'live')
   assert.equal(tree.nodes.length, 2)

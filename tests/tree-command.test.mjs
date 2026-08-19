@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { handleTreeCommand, navOptionLabel, registerTreeCommand } from '../lib/tree-command.js'
+import { handleTreeCommand, isDshWebProfile, navOptionLabel, registerTreeCommand } from '../lib/tree-command.js'
 
 function user(text, seq) {
   return { type: 'user/message', seq, data: { content: [{ type: 'text', text }] } }
@@ -119,6 +119,30 @@ test('handleTreeCommand parses indexes past 99', async () => {
 test('navOptionLabel hides the session uuid', () => {
   assert.equal(navOptionLabel({ id: 'deadbeef-uuid:2', role: 'user', preview: 'hello' }, 0, 'deadbeef-uuid:2'), '01  user: hello ←')
   assert.doesNotMatch(navOptionLabel({ id: 'deadbeef-uuid:2', role: 'user', preview: 'hello' }, 0), /deadbeef/)
+})
+
+test('isDshWebProfile detects dsh web and --profile web', () => {
+  assert.equal(isDshWebProfile(['node', '/usr/bin/dsh', 'web']), true)
+  assert.equal(isDshWebProfile(['node', '/usr/bin/dsh', '--profile', 'web']), true)
+  assert.equal(isDshWebProfile(['node', '/usr/bin/dsh', '--profile', 'pi-tui']), false)
+})
+
+test('registerTreeCommand skips the official web profile', () => {
+  const names = []
+  const ctx = {
+    get(name) {
+      if (name !== 'commands') return undefined
+      return { register(def) { names.push(def.name); return () => {} } }
+    },
+  }
+  const prev = process.argv
+  process.argv = ['node', '/usr/bin/dsh', 'web']
+  try {
+    registerTreeCommand(ctx)()
+  } finally {
+    process.argv = prev
+  }
+  assert.deepEqual(names, [])
 })
 
 test('registerTreeCommand is a no-op without commands', () => {

@@ -47,7 +47,7 @@ Filter (default `no-tool`; cycle `o` in the panel, or `--filter` / `/nav user`):
 | --- | --- |
 | CLI | `dsh-shelf tree` (session lineage) / `dsh-shelf tree <id>` (messages) |
 | Web panel | **Double-Esc** or the Tree button. ↑/↓ move, Enter preview / open, Esc close |
-| Host plugin | `/nav` picks a message and forks at that turn boundary |
+| Host plugin | `/nav` on **`dsh --profile pi-tui` only**. `dsh web` / `--profile web` is **not supported** (its question form is not a tree UI). |
 
 Selecting a user message forks *before* that turn (resubmit). Selecting an assistant message forks through its completed turn (continue from there). The handler prints a `/resume` hint; it does not switch the TUI.
 

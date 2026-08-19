@@ -47,7 +47,7 @@ dsh plugin --profile web add github:zoahdev/dsh-shelf
 | --- | --- |
 | CLI | `dsh-shelf tree`（会话谱系）/ `dsh-shelf tree <id>`（消息） |
 | Web 面板 | **连按 Esc** 或 Tree 按钮。↑/↓ 移动，Enter 预览/打开，Esc 关闭 |
-| 宿主插件 | `/nav` 选一条消息，在该轮次边界 fork |
+| 宿主插件 | `/nav` 仅 **`dsh --profile pi-tui`**。`dsh web` / `--profile web` **不支持**（官方提问表单不是树 UI）。 |
 
 选用户消息会 fork 到上一轮结束（方便改写重发）；选助手消息会 fork 到该轮结束（从这里继续）。命令只打印 `/resume` 提示，不会切换 TUI。
 

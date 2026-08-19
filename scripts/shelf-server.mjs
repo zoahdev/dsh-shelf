@@ -48,6 +48,8 @@ export function createShelfServer(root, archive, trash) {
             lines: renderTree(flat),
             nodes: flat.map(row => ({
               id: row.node.id,
+              role: row.node.role,
+              text: row.node.text,
               preview: row.node.preview,
               sessionId: row.node.sessionId,
               indent: row.indent,
