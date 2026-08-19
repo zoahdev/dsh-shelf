@@ -232,43 +232,43 @@ export function topSessions(root, limit = 5) {
     .slice(0, limit)
 }
 
-export async function exportSession(file, format = 'md') {
+/**
+ * Read a session log (plain or zstd) into header + events.
+ * The first `type: session` line is the header; everything else that
+ * parses as JSON is an event. Non-JSON tail bytes are ignored.
+ */
+export function readSessionLog(file) {
   const buffer = readFileSync(file)
-  if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_FILE_MAGIC)) {
-    return exportZstd(buffer, format)
-  }
-  const lines = buffer.toString('utf8').split(/\r?\n/u).filter(line => line.trim() !== '')
+  const compressed = buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_FILE_MAGIC)
+  const text = compressed ? decompressContainer(buffer) : buffer.toString('utf8')
+  const lines = text.split(/\r?\n/u).filter(line => line.trim() !== '')
+  const jsonLines = []
+  let header = {}
   const events = []
+  let sawHeader = false
   for (const line of lines) {
     try {
-      events.push(JSON.parse(line))
+      const parsed = JSON.parse(line)
+      jsonLines.push(line)
+      if (!sawHeader && parsed.type === 'session') {
+        header = parsed
+        sawHeader = true
+      } else {
+        events.push(parsed)
+      }
     } catch {
-      // non-JSON tail bytes are ignored for export
+      // non-JSON tail bytes are ignored
     }
   }
-  if (format === 'jsonl') return lines.join('\n') + '\n'
-  if (format === 'json') return JSON.stringify(events, null, 2) + '\n'
-  return renderMarkdown(events)
+  return { compressed, header, events, lines: jsonLines }
 }
 
-/**
- * Decode a Zstandard session log with node:zlib (Node >= 22.19 exposes
- * createZstdDecompress) and re-run the export pipeline on the plaintext.
- */
-function exportZstd(buffer, format) {
-  const plain = decompressContainer(buffer)
-  const lines = plain.split(/\r?\n/u).filter(line => line.trim() !== '')
-  const events = []
-  for (const line of lines) {
-    try {
-      events.push(JSON.parse(line))
-    } catch {
-      // non-JSON tail bytes are ignored for export
-    }
-  }
+export async function exportSession(file, format = 'md') {
+  const { events, header, lines } = readSessionLog(file)
+  const all = header.type === 'session' ? [header, ...events] : events
   if (format === 'jsonl') return lines.join('\n') + '\n'
-  if (format === 'json') return JSON.stringify(events, null, 2) + '\n'
-  return renderMarkdown(events)
+  if (format === 'json') return JSON.stringify(all, null, 2) + '\n'
+  return renderMarkdown(all)
 }
 
 function renderMarkdown(events) {
