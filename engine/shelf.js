@@ -12,13 +12,15 @@
  */
 
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { zstdDecompressSync } from 'node:zlib'
+import { createZstdDecompress, zstdDecompressSync } from 'node:zlib'
 import { dirname, join } from 'node:path'
 
 const ZSTD_FILE_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 const ZSTD_FRAME_MAGIC = 0xfd2fb528
 const SESSION_LOG_PLAIN = 'session.jsonl'
 const SESSION_LOG_ZSTD = 'session.jsonl.zstd'
+const HEADER_OUTPUT_LIMIT = 16 * 1024
+const HEADER_OUTPUT_CHUNK = 2048
 
 /**
  * Structurally scan a concatenated-Zstandard container into complete frames.
@@ -123,10 +125,31 @@ function parseHeaderLine(line, compressed) {
 }
 
 function firstZstdLine(buffer) {
-  const frames = scanZstdFrames(buffer)
-  if (frames.length === 0) return undefined
-  const plain = zstdDecompressSync(buffer.subarray(frames[0].start, frames[0].end)).toString('utf8')
-  return plain.split(/\r?\n/u, 1)[0]
+  if (buffer.length < 4 || buffer.readUInt32LE(0) !== ZSTD_FRAME_MAGIC) return undefined
+  const decoder = createZstdDecompress({ chunkSize: HEADER_OUTPUT_CHUNK })
+  const handle = decoder._handle
+  if (handle === undefined || typeof handle.writeSync !== 'function') return undefined
+  try {
+    let acc = ''
+    let inOff = 0
+    while (inOff < buffer.length && acc.length < HEADER_OUTPUT_LIMIT) {
+      const out = Buffer.alloc(HEADER_OUTPUT_CHUNK)
+      handle.writeSync(0, buffer, inOff, buffer.length - inOff, out, 0, out.length)
+      const availOut = decoder._writeState[0]
+      const availIn = decoder._writeState[1]
+      const produced = out.length - availOut
+      if (produced > 0) acc += out.subarray(0, produced).toString('utf8')
+      const nl = acc.search(/\r?\n/u)
+      if (nl !== -1) return acc.slice(0, nl)
+      const consumed = buffer.length - inOff - availIn
+      if (consumed <= 0) break
+      inOff += consumed
+    }
+    return acc === '' ? undefined : acc.slice(0, HEADER_OUTPUT_LIMIT)
+  } finally {
+    try { handle.close() } catch { /* already closed */ }
+    decoder.destroy()
+  }
 }
 
 function readHeader(file) {

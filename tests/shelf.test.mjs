@@ -135,6 +135,23 @@ test('listSessions prefers session.jsonl.zstd when both log names exist', async 
   }
 })
 
+test('listSessions reads the header of a large one-frame zstd log without needing the body', async () => {
+  const root = tempRoot()
+  try {
+    const blob = Array.from({ length: 8000 }, (_, i) => `row-${i}-${'abcd'.repeat(16)}`).join('\n')
+    await writeZstdSession(root, 'huge', [
+      { type: 'user/message', data: { content: [{ type: 'text', text: blob }] } },
+    ], 4000)
+    const sessions = listSessions(join(root, 'sessions'))
+    assert.equal(sessions.length, 1)
+    assert.equal(sessions[0].id, 'huge')
+    assert.equal(sessions[0].createdAt, 4000)
+    assert.equal(sessions[0].compressed, true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('sessionStats counts plain and compressed sessions and bytes', () => {
   const root = tempRoot()
   try {
