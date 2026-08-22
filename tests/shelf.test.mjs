@@ -18,6 +18,7 @@ import {
   tokenizeQuery,
   verifySessions,
 } from '../engine/shelf.js'
+import { apply } from '../lib/index.js'
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), 'dsh-shelf-'))
@@ -33,6 +34,28 @@ function writeSession(root, id, events, createdAt = 1000) {
   writeFileSync(join(dir, 'session.jsonl'), lines.join('\n') + '\n')
   return dir
 }
+
+test('host plugin uses dshHomePath without probing an uninjected baseDir service', () => {
+  const root = tempRoot()
+  const messages = []
+  const ctx = new Proxy({
+    dshHomePath: () => root,
+    logger: { info: message => messages.push(message) },
+  }, {
+    get(target, property, receiver) {
+      if (property === 'baseDir') throw new Error('baseDir service was probed')
+      return Reflect.get(target, property, receiver)
+    },
+  })
+
+  const dispose = apply(ctx, { port: 0 })
+  try {
+    assert.match(messages[0], new RegExp(join(root, 'sessions').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  } finally {
+    dispose()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('listSessions finds session files and parses headers', () => {
   const root = tempRoot()
