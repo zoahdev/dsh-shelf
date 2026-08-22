@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createShelfServer } from '../scripts/shelf-server.mjs'
 import { createZstdCompress } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -249,6 +250,30 @@ test('compressed parent-child sessions stay in the family tree', async () => {
     const tree = sessionMessageTree(join(root, 'sessions'), 'parent')
     assert.ok(tree.lines.some(line => line.includes('other')))
   } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('/api/tree lineage payload includes role so the web panel does not render undefined:', async () => {
+  const root = tempRoot()
+  const sessions = join(root, 'sessions')
+  let server
+  try {
+    writeSession(root, { id: 's1', title: 'alpha' }, [user('hello')])
+    server = createShelfServer(sessions, join(root, 'archive'), join(root, 'trash'))
+    await new Promise((resolve, reject) => {
+      server.listen(0, '127.0.0.1', resolve)
+      server.on('error', reject)
+    })
+    const { port } = server.address()
+    const data = await (await fetch(`http://127.0.0.1:${port}/api/tree`)).json()
+    assert.equal(data.kind, 'lineage')
+    assert.ok(data.nodes.length > 0)
+    assert.ok(data.nodes.every(node => node.role === 'session'))
+    assert.ok(data.lines.every(line => !line.includes('undefined:')))
+    assert.match(data.lines.join('\n'), /session: alpha/)
+  } finally {
+    await new Promise(resolve => server?.close(resolve))
     rmSync(root, { recursive: true, force: true })
   }
 })
