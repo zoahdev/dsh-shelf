@@ -135,6 +135,26 @@ test('listSessions prefers session.jsonl.zstd when both log names exist', async 
   }
 })
 
+test('listSessions preserves a CJK title split across zstd output chunks', async () => {
+  const root = tempRoot()
+  try {
+    const title = '测'.repeat(1200)
+    const dir = join(root, 'sessions', 'p', 'cjk')
+    mkdirSync(dir, { recursive: true })
+    const lines = [
+      JSON.stringify({ type: 'session', version: 0, id: 'cjk', createdAt: 5000, title }),
+      JSON.stringify({ type: 'turn/start' }),
+    ]
+    writeFileSync(join(dir, 'session.jsonl.zstd'), await compressZstd(lines.join('\n') + '\n'))
+    const sessions = listSessions(join(root, 'sessions'))
+    assert.equal(sessions[0].id, 'cjk')
+    assert.equal(sessions[0].title, title)
+    assert.doesNotMatch(sessions[0].title, /\uFFFD/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('listSessions reads the header of a large one-frame zstd log without needing the body', async () => {
   const root = tempRoot()
   try {

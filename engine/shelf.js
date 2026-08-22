@@ -11,7 +11,7 @@
  * @module dsh-shelf/engine
  */
 
-import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { createZstdDecompress, zstdDecompressSync } from 'node:zlib'
 import { dirname, join } from 'node:path'
 
@@ -21,6 +21,7 @@ const SESSION_LOG_PLAIN = 'session.jsonl'
 const SESSION_LOG_ZSTD = 'session.jsonl.zstd'
 const HEADER_OUTPUT_LIMIT = 16 * 1024
 const HEADER_OUTPUT_CHUNK = 2048
+const HEADER_INPUT_CHUNK = 16 * 1024
 
 /**
  * Structurally scan a concatenated-Zstandard container into complete frames.
@@ -124,44 +125,73 @@ function parseHeaderLine(line, compressed) {
   }
 }
 
-function firstZstdLine(buffer) {
-  if (buffer.length < 4 || buffer.readUInt32LE(0) !== ZSTD_FRAME_MAGIC) return undefined
+function lineFromBytes(bytes) {
+  const nl = bytes.indexOf(0x0a)
+  const end = nl === -1 ? bytes.length : (nl > 0 && bytes[nl - 1] === 0x0d ? nl - 1 : nl)
+  return bytes.subarray(0, Math.min(end, HEADER_OUTPUT_LIMIT)).toString('utf8')
+}
+
+function firstZstdLineFromFile(file) {
+  const fd = openSync(file, 'r')
   const decoder = createZstdDecompress({ chunkSize: HEADER_OUTPUT_CHUNK })
   const handle = decoder._handle
-  if (handle === undefined || typeof handle.writeSync !== 'function') return undefined
   try {
-    let acc = ''
-    let inOff = 0
-    while (inOff < buffer.length && acc.length < HEADER_OUTPUT_LIMIT) {
+    if (handle === undefined || typeof handle.writeSync !== 'function') return undefined
+    const magic = Buffer.alloc(4)
+    if (readSync(fd, magic, 0, 4, 0) < 4 || magic.readUInt32LE(0) !== ZSTD_FRAME_MAGIC) return undefined
+    let acc = Buffer.alloc(0)
+    let leftover = Buffer.alloc(0)
+    let fileOff = 0
+    while (acc.length < HEADER_OUTPUT_LIMIT) {
+      const fresh = Buffer.alloc(HEADER_INPUT_CHUNK)
+      const got = readSync(fd, fresh, 0, HEADER_INPUT_CHUNK, fileOff)
+      fileOff += got
+      const input = got === 0 ? leftover : Buffer.concat([leftover, fresh.subarray(0, got)])
+      if (input.length === 0) break
       const out = Buffer.alloc(HEADER_OUTPUT_CHUNK)
-      handle.writeSync(0, buffer, inOff, buffer.length - inOff, out, 0, out.length)
+      handle.writeSync(0, input, 0, input.length, out, 0, out.length)
       const availOut = decoder._writeState[0]
       const availIn = decoder._writeState[1]
       const produced = out.length - availOut
-      if (produced > 0) acc += out.subarray(0, produced).toString('utf8')
-      const nl = acc.search(/\r?\n/u)
-      if (nl !== -1) return acc.slice(0, nl)
-      const consumed = buffer.length - inOff - availIn
-      if (consumed <= 0) break
-      inOff += consumed
+      if (produced > 0) acc = Buffer.concat([acc, out.subarray(0, produced)])
+      if (acc.indexOf(0x0a) !== -1) return lineFromBytes(acc)
+      leftover = availIn > 0 ? input.subarray(input.length - availIn) : Buffer.alloc(0)
+      if (got === 0) break
     }
-    return acc === '' ? undefined : acc.slice(0, HEADER_OUTPUT_LIMIT)
+    return acc.length === 0 ? undefined : lineFromBytes(acc)
   } finally {
     try { handle.close() } catch { /* already closed */ }
     decoder.destroy()
+    closeSync(fd)
+  }
+}
+
+function readMagic(file) {
+  const fd = openSync(file, 'r')
+  try {
+    const magic = Buffer.alloc(4)
+    const n = readSync(fd, magic, 0, 4, 0)
+    return n >= 4 ? magic : Buffer.alloc(0)
+  } finally {
+    closeSync(fd)
   }
 }
 
 function readHeader(file) {
+  let zstd = file.endsWith('.zstd')
   try {
-    const buffer = readFileSync(file)
-    if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_FILE_MAGIC)) {
-      return parseHeaderLine(firstZstdLine(buffer), true)
+    zstd = zstd || readMagic(file).equals(ZSTD_FILE_MAGIC)
+    if (zstd) return parseHeaderLine(firstZstdLineFromFile(file), true)
+    const fd = openSync(file, 'r')
+    try {
+      const preview = Buffer.alloc(HEADER_OUTPUT_LIMIT)
+      const n = readSync(fd, preview, 0, preview.length, 0)
+      return parseHeaderLine(lineFromBytes(preview.subarray(0, n)), false)
+    } finally {
+      closeSync(fd)
     }
-    const line = buffer.toString('utf8').split(/\r?\n/u, 1)[0]
-    return parseHeaderLine(line, false)
   } catch {
-    return { compressed: file.endsWith('.zstd'), id: undefined, createdAt: undefined }
+    return { compressed: zstd, id: undefined, createdAt: undefined }
   }
 }
 
