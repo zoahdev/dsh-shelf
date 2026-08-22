@@ -78,9 +78,10 @@
       return (bytes/1048576).toFixed(1) + ' MB'
     }
     function render(sessions) {
+      const listed = [...sessions].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
       const list = $('list')
-      if (sessions.length === 0) { list.innerHTML = '<div class="empty">No sessions found.</div>'; return }
-      list.innerHTML = sessions.map(s => `
+      if (listed.length === 0) { list.innerHTML = '<div class="empty">No sessions found.</div>'; return }
+      list.innerHTML = listed.map(s => `
         <div class="row">
           <span class="id">${esc(s.id ?? '(no id)')}${s.compressed ? ' <small>[zstd]</small>' : ''}</span>
           <span class="meta">${esc(s.file)}</span>
@@ -108,7 +109,7 @@
       const q = $('q').value.trim()
       if (!q) return load()
       const hits = await api('/api/search?q=' + encodeURIComponent(q))
-      render(hits.map(h => ({ id: h.id, file: h.file, compressed: false })))
+      render(hits.map(h => ({ id: h.id, file: h.file, compressed: false, createdAt: h.createdAt })))
     })
     $('refresh').addEventListener('click', load)
     $('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('search').click() })

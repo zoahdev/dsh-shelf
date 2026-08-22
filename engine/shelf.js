@@ -11,12 +11,17 @@
  * @module dsh-shelf/engine
  */
 
-import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { zstdDecompressSync } from 'node:zlib'
-import { join } from 'node:path'
+import { closeSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { createZstdDecompress, zstdDecompressSync } from 'node:zlib'
+import { dirname, join } from 'node:path'
 
 const ZSTD_FILE_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 const ZSTD_FRAME_MAGIC = 0xfd2fb528
+const SESSION_LOG_PLAIN = 'session.jsonl'
+const SESSION_LOG_ZSTD = 'session.jsonl.zstd'
+const HEADER_OUTPUT_LIMIT = 16 * 1024
+const HEADER_OUTPUT_CHUNK = 2048
+const HEADER_INPUT_CHUNK = 16 * 1024
 
 /**
  * Structurally scan a concatenated-Zstandard container into complete frames.
@@ -98,37 +103,106 @@ export function sessionFiles(root) {
         // broken links / unreadable dirs are skipped
       }
     }
-    for (const entry of entries) {
-      if (entry === 'session.jsonl') out.push(join(dir, entry))
-    }
+    // Current DSH writes compressed logs as session.jsonl.zstd; older/plain
+    // sessions stay session.jsonl. Prefer the zstd name when both exist.
+    if (entries.includes(SESSION_LOG_ZSTD)) out.push(join(dir, SESSION_LOG_ZSTD))
+    else if (entries.includes(SESSION_LOG_PLAIN)) out.push(join(dir, SESSION_LOG_PLAIN))
   }
   walk(root, 0)
   return out
 }
 
-function readHeader(file) {
+function parseHeaderLine(line, compressed) {
+  if (line === undefined || line.trim() === '') return { compressed, id: undefined, createdAt: undefined }
+  const header = JSON.parse(line)
+  return {
+    compressed,
+    id: typeof header.id === 'string' ? header.id : undefined,
+    createdAt: typeof header.createdAt === 'number' ? header.createdAt : undefined,
+    title: typeof header.title === 'string' ? header.title : undefined,
+    parentSession: typeof header.parentSession === 'string' ? header.parentSession : undefined,
+    seedLength: typeof header.seedLength === 'number' ? header.seedLength : undefined,
+  }
+}
+
+function lineFromBytes(bytes) {
+  const nl = bytes.indexOf(0x0a)
+  const end = nl === -1 ? bytes.length : (nl > 0 && bytes[nl - 1] === 0x0d ? nl - 1 : nl)
+  return bytes.subarray(0, Math.min(end, HEADER_OUTPUT_LIMIT)).toString('utf8')
+}
+
+function firstZstdLineFromFile(file) {
+  const fd = openSync(file, 'r')
+  const decoder = createZstdDecompress({ chunkSize: HEADER_OUTPUT_CHUNK })
+  const handle = decoder._handle
   try {
-    const buffer = readFileSync(file)
-    if (buffer.length >= 4 && buffer.subarray(0, 4).equals(ZSTD_FILE_MAGIC)) {
-      return { compressed: true, id: undefined, createdAt: undefined }
+    if (handle === undefined || typeof handle.writeSync !== 'function') return undefined
+    const magic = Buffer.alloc(4)
+    if (readSync(fd, magic, 0, 4, 0) < 4 || magic.readUInt32LE(0) !== ZSTD_FRAME_MAGIC) return undefined
+    let acc = Buffer.alloc(0)
+    let leftover = Buffer.alloc(0)
+    let fileOff = 0
+    while (acc.length < HEADER_OUTPUT_LIMIT) {
+      const fresh = Buffer.alloc(HEADER_INPUT_CHUNK)
+      const got = readSync(fd, fresh, 0, HEADER_INPUT_CHUNK, fileOff)
+      fileOff += got
+      const input = got === 0 ? leftover : Buffer.concat([leftover, fresh.subarray(0, got)])
+      if (input.length === 0) break
+      const out = Buffer.alloc(HEADER_OUTPUT_CHUNK)
+      handle.writeSync(0, input, 0, input.length, out, 0, out.length)
+      const availOut = decoder._writeState[0]
+      const availIn = decoder._writeState[1]
+      const produced = out.length - availOut
+      if (produced > 0) acc = Buffer.concat([acc, out.subarray(0, produced)])
+      if (acc.indexOf(0x0a) !== -1) return lineFromBytes(acc)
+      leftover = availIn > 0 ? input.subarray(input.length - availIn) : Buffer.alloc(0)
+      if (got === 0) break
     }
-    const line = buffer.toString('utf8').split(/\r?\n/u, 1)[0]
-    if (line === undefined || line.trim() === '') return { compressed: false, id: undefined, createdAt: undefined }
-    const header = JSON.parse(line)
-    return {
-      compressed: false,
-      id: typeof header.id === 'string' ? header.id : undefined,
-      createdAt: typeof header.createdAt === 'number' ? header.createdAt : undefined,
-      title: typeof header.title === 'string' ? header.title : undefined,
+    return acc.length === 0 ? undefined : lineFromBytes(acc)
+  } finally {
+    try { handle.close() } catch { /* already closed */ }
+    decoder.destroy()
+    closeSync(fd)
+  }
+}
+
+function readMagic(file) {
+  const fd = openSync(file, 'r')
+  try {
+    const magic = Buffer.alloc(4)
+    const n = readSync(fd, magic, 0, 4, 0)
+    return n >= 4 ? magic : Buffer.alloc(0)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+function readHeader(file) {
+  let zstd = file.endsWith('.zstd')
+  try {
+    zstd = zstd || readMagic(file).equals(ZSTD_FILE_MAGIC)
+    if (zstd) return parseHeaderLine(firstZstdLineFromFile(file), true)
+    const fd = openSync(file, 'r')
+    try {
+      const preview = Buffer.alloc(HEADER_OUTPUT_LIMIT)
+      const n = readSync(fd, preview, 0, preview.length, 0)
+      return parseHeaderLine(lineFromBytes(preview.subarray(0, n)), false)
+    } finally {
+      closeSync(fd)
     }
   } catch {
-    return { compressed: false, id: undefined, createdAt: undefined }
+    return { compressed: zstd, id: undefined, createdAt: undefined }
   }
+}
+
+function byNewest(a, b) {
+  return (b.createdAt ?? 0) - (a.createdAt ?? 0)
 }
 
 export function listSessions(root) {
   return sessionFiles(root)
-    .map(file => ({ file, dir: file.slice(0, -'session.jsonl'.length), ...readHeader(file) }))
+    .map(file => ({ file, dir: dirname(file), ...readHeader(file) }))
+    .sort(byNewest)
 }
 
 export function sessionStats(root) {
