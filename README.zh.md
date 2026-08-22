@@ -23,6 +23,8 @@ npx dsh-shelf archive-old 30                # 预演：30 天前的会话
 npx dsh-shelf verify                        # 会话健康检查（孤儿 tool call/未完成/空文件）
 npx dsh-shelf rescue <id>                   # 抢救不可恢复会话的内容
 npx dsh-shelf archive-old 30 --yes          # 移入 sessions-archive
+npx dsh-shelf tree                          # 会话 fork 谱系
+npx dsh-shelf tree <id>                     # 消息树（pi /tree）
 npx dsh-shelf web                           # 本地 Web 面板 http://127.0.0.1:4174
 ```
 
@@ -34,6 +36,20 @@ dsh plugin --profile web add github:zoahdev/dsh-shelf
 ```
 
 根目录：`--root` 指定；默认 `$DSH_SESSIONS` 或 `~/.dsh/sessions`。归档/回收站默认在根目录旁 `sessions-archive` / `sessions-trash`。
+
+## 消息导航（`/tree`）
+
+[pi](https://github.com/earendil-works/pi) `/tree`（连按 Esc）的精简移植。DSH 的分支存在于会话之间（`parentSession` + `seedLength`），所以树是从 fork 谱系重建的，不是文件内 entry 图。标签、折叠、分支摘要没有抄过来。
+
+过滤（默认 `no-tool`；面板里按 `o` 循环，或 `--filter` / `/nav user`）：`no-tool`（用户 + 助手正文）、`user`、`all`（含 tool call）。
+
+| 入口 | 用法 |
+| --- | --- |
+| CLI | `dsh-shelf tree`（会话谱系）/ `dsh-shelf tree <id>`（消息） |
+| Web 面板 | **连按 Esc** 或 Tree 按钮。↑/↓ 移动，Enter 预览/打开，Esc 关闭 |
+| 宿主插件 | `/nav` 仅 **`dsh --profile pi-tui`**。`dsh web` / `--profile web` **不支持**（官方提问表单不是树 UI）。 |
+
+选用户消息会 fork 到上一轮结束（方便改写重发）；选助手消息会 fork 到该轮结束（从这里继续）。命令只打印 `/resume` 提示，不会切换 TUI。
 
 ## 安全模型
 
@@ -60,6 +76,7 @@ dsh plugin --profile web add github:zoahdev/dsh-shelf
 - [x] 会话健康检查（verify）+ 不可恢复会话抢救导出（#1959/#2034 家族）
 - [ ] FTS5 搜索（宿主提供 SQLite FTS5 时）
 - [x] Zstandard 导出（Node ≥ 22.19 node:zlib 解码）
+- [x] 消息导航（`tree`、Web 面板连按 Esc、宿主 `/nav`）—— pi `/tree` 精简移植
 
 ## License
 

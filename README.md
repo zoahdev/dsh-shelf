@@ -23,6 +23,8 @@ npx dsh-shelf verify                        # session health check (orphan tool 
 npx dsh-shelf rescue <id>                   # export an un-resumable session's content
 npx dsh-shelf archive-old 30                # dry run: sessions older than 30 days
 npx dsh-shelf archive-old 30 --yes          # move them to sessions-archive
+npx dsh-shelf tree                          # session fork lineage
+npx dsh-shelf tree <id>                     # message tree (pi /tree)
 npx dsh-shelf web                           # local web panel at http://127.0.0.1:4174
 ```
 
@@ -35,6 +37,20 @@ dsh plugin --profile web add github:zoahdev/dsh-shelf
 
 Roots: `--root` overrides; default is `$DSH_SESSIONS` or `~/.dsh/sessions`. Archive/trash roots default to `sessions-archive` / `sessions-trash` next to the root.
 
+## Message navigation (`/tree`)
+
+Slim clone of [pi](https://github.com/earendil-works/pi) `/tree` (double-Esc). DSH stores branches *between* sessions (`parentSession` + `seedLength`), so the tree is reconstructed from fork lineage rather than an in-file entry graph. Labels, fold, and branch summarization are not copied.
+
+Filter (default `no-tool`; cycle `o` in the panel, or `--filter` / `/nav user`): `no-tool` (user + assistant text), `user`, `all` (includes tool calls).
+
+| Surface | How |
+| --- | --- |
+| CLI | `dsh-shelf tree` (session lineage) / `dsh-shelf tree <id>` (messages) |
+| Web panel | **Double-Esc** or the Tree button. ↑/↓ move, Enter preview / open, Esc close |
+| Host plugin | `/nav` on **`dsh --profile pi-tui` only**. `dsh web` / `--profile web` is **not supported** (its question form is not a tree UI). |
+
+Selecting a user message forks *before* that turn (resubmit). Selecting an assistant message forks through its completed turn (continue from there). The handler prints a `/resume` hint; it does not switch the TUI.
+
 ## Safety model
 
 - Listing, stats, export, and search are **strictly read-only**.
@@ -45,7 +61,7 @@ Roots: `--root` overrides; default is `$DSH_SESSIONS` or `~/.dsh/sessions`. Arch
 ## Development
 
 ```sh
-node --test tests/shelf.test.mjs
+node --test tests/*.test.mjs
 node scripts/shelf.mjs list --root <fixtures>
 ```
 
@@ -66,6 +82,7 @@ node scripts/shelf.mjs list --root <fixtures>
 - [x] session health check (`verify`) + rescue export for un-resumable sessions (#1959/#2034 family)
 - [ ] FTS5-backed search when the host provides SQLite FTS5
 - [x] Zstandard export (node:zlib decode on Node >= 22.19)
+- [x] Message navigation (`tree`, double-Esc in the web panel, `/nav` on the host) — slim clone of pi `/tree`
 
 ## License
 
